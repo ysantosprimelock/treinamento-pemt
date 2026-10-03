@@ -105,7 +105,7 @@ function linhasInfo(pag, ctx, topo, itens) {
 }
 
 function rodape(pag, ctx) {
-  texto(pag, ctx, `Gerado pelo App Treinamento PEMT em ${ctx.geradoEm} - ID do treinamento: ${ctx.id}`, M, 22, CW, 10, { tam: 6.5, cor: CINZA_TXT, min: 5 });
+  texto(pag, ctx, `${DOC.rodape} em ${ctx.geradoEm}`, M, 22, CW, 10, { tam: 6.5, cor: CINZA_TXT, min: 5 });
 }
 
 function dataBR(iso) { return iso ? iso.split('-').reverse().join('/') : ''; }

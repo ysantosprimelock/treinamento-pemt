@@ -6,5 +6,6 @@ export const DOC = {
   revisao: '1',
   nomeTreinamento: 'CURSO DE FORMAÇÃO EM PLATAFORMA ELEVATÓRIA MÓVEL DE TRABALHO (PEMT)',
   cargaHoraria: '04 Horas',
-  instituicao: 'KIMTECH'
+  instituicao: 'KIMTECH',
+  rodape: 'Gerado pelo Kimtech - Manutenções' // + ' em DD/MM/AAAA, HH:MM'
 };
