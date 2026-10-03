@@ -4,7 +4,7 @@ export const SUPABASE_URL = 'https://curiyfnhzqrpfljnihty.supabase.co';
 
 // Chave PÚBLICA (anon / publishable). Pode ficar no app: as regras do banco protegem os dados.
 // NUNCA cole aqui a chave secreta (service_role / secret).
-export const SUPABASE_ANON_KEY = 'COLE_AQUI_A_CHAVE_PUBLICA';
+export const SUPABASE_ANON_KEY = 'sb_publishable_yDMVsUz-uoKhttvD4Y4O3A_02veS40b';
 // ===============================================================
 
 export const BUCKET = 'treinamentos';
