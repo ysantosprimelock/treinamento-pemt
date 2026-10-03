@@ -10,6 +10,7 @@ import Cabecalho from '../componentes/Cabecalho';
 // Campos que sempre ficam em MAIÚSCULAS
 const up = s => String(s || '').toLocaleUpperCase('pt-BR');
 const CAMPOS_MAIUSC = ['cliente', 'local', 'cidade'];
+export const emailValido = v => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v);
 
 const PASSOS = ['Turma', 'Fotos', 'Operadores', 'Assinar'];
 const FAB_PADRAO = ['Skyjack', 'Genie', 'JLG'];
@@ -22,6 +23,7 @@ export function validar(passo, t) {
     if (!t.cidade.trim()) e.push('Informe a cidade.');
     if (!t.uf) e.push('Selecione a UF.');
     if (!t.data) e.push('Informe a data.');
+    if (t.emailCliente && !emailValido(t.emailCliente)) e.push('E-mail do cliente inválido. Confira ou deixe em branco.');
     if (!t.fabricantes.length) e.push('Marque ao menos um fabricante.');
     if (!t.maquinas.length) e.push('Adicione ao menos uma máquina ou modelo.');
   }
@@ -245,6 +247,12 @@ export default function Editor({ id, listas, aoVoltar, aoFinalizar }) {
                 </label>
               </div>
               <label>Data<input type="date" value={t.data} onChange={setCampo('data')} /></label>
+              <label>E-mail do cliente (envio dos certificados)
+                <input type="email" inputMode="email" autoComplete="off" autoCapitalize="off" spellCheck={false} placeholder="compras@cliente.com.br"
+                  value={t.emailCliente || ''} onChange={e => { const v = e.target.value.trim().toLowerCase(); alterar(() => ({ emailCliente: v })); }} />
+              </label>
+              {t.emailCliente && !emailValido(t.emailCliente) && <span className="erro-campo">E-mail incompleto ou inválido.</span>}
+              <p className="dica" style={{ marginTop: 4 }}>Opcional. Sem e-mail, os certificados vão só para a Kimtech.</p>
             </section>
 
             <section className="sec">
@@ -343,6 +351,7 @@ export default function Editor({ id, listas, aoVoltar, aoFinalizar }) {
                 <dt>Cliente</dt><dd>{t.cliente}</dd>
                 <dt>Local</dt><dd>{t.local} — {t.cidade}/{t.uf}</dd>
                 <dt>Data</dt><dd>{fmtData(t.data)}</dd>
+                <dt>E-mail</dt><dd>{t.emailCliente || 'não informado (só Kimtech)'}</dd>
                 <dt>Fabricantes</dt><dd>{t.fabricantes.join(' / ')}</dd>
                 <dt>Máquinas</dt><dd>{t.maquinas.join(' / ')}</dd>
                 <dt>Fotos</dt><dd>{t.fotos.length}</dd>

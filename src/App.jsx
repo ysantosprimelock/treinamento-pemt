@@ -126,7 +126,7 @@ function Principal() {
   async function novo() {
     const t = {
       id: uuid(), userId: usuario.id, status: 'rascunho', criadoEm: Date.now(), atualizadoEm: Date.now(),
-      cliente: '', local: '', cidade: '', uf: '', data: hoje(), fabricantes: [], maquinas: [],
+      cliente: '', local: '', cidade: '', uf: '', data: hoje(), emailCliente: '', fabricantes: [], maquinas: [],
       fotos: [], operadores: [{ k: uuid(), nome: '', cpf: '', funcao: '' }], assinaturas: {}
     };
     await db.put('treinamentos', t);

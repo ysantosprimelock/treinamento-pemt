@@ -99,6 +99,7 @@ export function criarSync({ supabase, db, agora = () => Date.now(), carregarLogo
       cidade: t.cidade.trim(),
       uf: t.uf,
       data: t.data,
+      email_cliente: t.emailCliente || '',
       criado_no_aparelho_em: new Date(t.criadoEm).toISOString(),
       fabricantes: t.fabricantes,
       maquinas: t.maquinas,

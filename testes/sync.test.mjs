@@ -93,6 +93,7 @@ ok(sb.rpcs.length === 1 && sb.rpcs[0].nome === 'registrar_treinamento', 'registr
 ok(JSON.stringify(p.fotos) === JSON.stringify(['U1/T1/fotos/01.jpg', 'U1/T1/fotos/02.jpg', 'U1/T1/fotos/03.jpg']), 'caminhos das fotos no padrão do banco: ' + p.fotos[0]);
 ok(p.participantes[1].assinatura_path === 'U1/T1/assinaturas/02.png' && p.participantes[0].cpf === '529.982.247-25', 'caminhos das assinaturas e CPF corretos');
 ok(p.cliente === 'ACME' && p.id === 'T1' && typeof p.criado_no_aparelho_em === 'string', 'payload limpo (cliente sem espaços, id, data do aparelho)');
+ok(p.email_cliente === '', 'payload envia e-mail do cliente (vazio quando não informado)');
 ok((await db.arquivosDe('T1')).length === 6, 'cópia local mantida depois do envio (fotos, assinaturas e PDF)');
 
 console.log('3) Queda no meio do envio: retoma sem reenviar o que já subiu');
