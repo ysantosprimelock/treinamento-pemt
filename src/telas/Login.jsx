@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { supabase } from '../supabase';
+import Cabecalho from '../componentes/Cabecalho';
 
 export default function Login({ online }) {
   const [email, setEmail] = useState('');
@@ -23,10 +24,7 @@ export default function Login({ online }) {
 
   return (
     <>
-      <header className="cab">
-        <div className="faixa" aria-hidden="true" />
-        <div className="cab-linha"><span className="cab-titulo">Treinamento PEMT</span></div>
-      </header>
+      <Cabecalho titulo="Treinamento PEMT" />
       <div className="login">
         <form className="sec" onSubmit={entrar}>
           <h2>Entrar</h2>

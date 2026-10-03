@@ -2,6 +2,10 @@ import 'fake-indexeddb/auto';
 import * as db from '../src/lib/db.js';
 import { criarSync, classificarErro } from '../src/lib/sync.js';
 import { cpfValido, mascaraCpf } from '../src/lib/cpf.js';
+import fs from 'node:fs';
+import { PDFDocument } from 'pdf-lib';
+const fx = n => new Uint8Array(fs.readFileSync(new URL('./fixtures/' + n, import.meta.url)));
+const LOGO = new Uint8Array(fs.readFileSync(new URL('../public/logo-kimtech.png', import.meta.url)));
 
 let pass = 0, fail = 0;
 const ok = (c, m) => { if (c) { pass++; console.log('  ok  ', m); } else { fail++; console.log('  FALHA', m); } };
@@ -16,10 +20,11 @@ function supabaseFalso() {
     erroRpc: null,
     contUpload: 0,
     auth: { getSession: async () => ({ data: { session: s.sessao } }) },
+    from: tabela => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: tabela === 'perfis' ? { nome: 'INSTRUTOR 01 TESTE' } : null, error: null }) }) }) }),
     storage: { from: (bucket) => ({ upload: async (caminho, blob, op) => {
       s.contUpload++;
       if (s.falharUploadNo && s.contUpload === s.falharUploadNo) return { data: null, error: s.erroUpload };
-      s.uploads.push({ bucket, caminho, tam: blob.size, upsert: op.upsert, tipo: op.contentType });
+      s.uploads.push({ bucket, caminho, tam: blob.size, upsert: op.upsert, tipo: op.contentType, blob });
       return { data: { path: caminho }, error: null };
     } }) },
     rpc: async (nome, args) => {
@@ -38,7 +43,7 @@ async function criarTreinamento(id, userId, nFotos = 3, nOps = 2, status = 'pron
   const fotos = [];
   for (let i = 0; i < nFotos; i++) {
     const chave = `${id}:foto:${i}`;
-    await db.put('arquivos', { chave, treinamentoId: id, tipo: 'foto', blob: new Blob([new Uint8Array(1000 + i)], { type: 'image/jpeg' }) });
+    await db.put('arquivos', { chave, treinamentoId: id, tipo: 'foto', blob: new Blob([fx(`foto-${(i % 6) + 1}.jpg`)], { type: 'image/jpeg' }) });
     fotos.push(chave);
   }
   const operadores = [], assinaturas = {};
@@ -47,7 +52,7 @@ async function criarTreinamento(id, userId, nFotos = 3, nOps = 2, status = 'pron
     const k = `op${i}`;
     operadores.push({ k, nome: `Operador ${i} Silva`, cpf: cpfs[i], funcao: i ? '' : 'Operador' });
     const chave = `${id}:ass:${k}`;
-    await db.put('arquivos', { chave, treinamentoId: id, tipo: 'assinatura', blob: new Blob([new Uint8Array(500)], { type: 'image/png' }) });
+    await db.put('arquivos', { chave, treinamentoId: id, tipo: 'assinatura', blob: new Blob([fx(`assinatura-${(i % 3) + 1}.png`)], { type: 'image/png' }) });
     assinaturas[k] = chave;
   }
   await db.put('treinamentos', { id, userId, status, criadoEm: relogio, finalizadoEm: relogio, cliente: ' ACME ', local: 'Pátio', cidade: 'Fortaleza', uf: 'CE', data: '2026-10-02', fabricantes: ['Skyjack'], maquinas: ['3219'], fotos, operadores, assinaturas });
@@ -59,7 +64,8 @@ ok(mascaraCpf('52998224725') === '529.982.247-25', 'máscara de CPF');
 
 console.log('1) Sem internet: nada se perde');
 const sb = supabaseFalso();
-const sync = criarSync({ supabase: sb, db, agora });
+let chamadasLogo = 0;
+const sync = criarSync({ supabase: sb, db, agora, carregarLogo: async () => { chamadasLogo++; return LOGO; } });
 await criarTreinamento('T1', 'U1');
 sb.falharUploadNo = 1;
 let r = await sync.sincronizar();
@@ -76,13 +82,18 @@ sb.falharUploadNo = null;
 r = await sync.sincronizar({ ignorarEspera: true });
 t1 = await db.get('treinamentos', 'T1');
 ok(r.enviados === 1 && t1.status === 'enviado', 'enviado após a internet voltar');
-ok(sb.uploads.length === 5 && sb.uploads.every(u => u.upsert && u.bucket === 'treinamentos'), '5 arquivos enviados ao bucket, com upsert');
+ok(sb.uploads.length === 6 && sb.uploads.every(u => u.upsert && u.bucket === 'treinamentos'), '6 arquivos enviados ao bucket (3 fotos, 2 assinaturas, 1 PDF), com upsert');
+const upPdf = sb.uploads.find(u => u.caminho === 'U1/T1/lista-presenca.pdf');
+ok(upPdf && upPdf.tipo === 'application/pdf', 'PDF enviado em U1/T1/lista-presenca.pdf');
+const docPdf = await PDFDocument.load(new Uint8Array(await upPdf.blob.arrayBuffer()));
+ok(docPdf.getPageCount() === 2, 'PDF válido com 2 páginas (lista + fotos)');
+ok(sb.uploads.findIndex(u => u.caminho.endsWith('.pdf')) < sb.uploads.length && sb.rpcs.length === 1, 'PDF sobe antes do registro no banco');
 const p = sb.rpcs[0].args.p;
 ok(sb.rpcs.length === 1 && sb.rpcs[0].nome === 'registrar_treinamento', 'registrar_treinamento chamado 1 vez');
 ok(JSON.stringify(p.fotos) === JSON.stringify(['U1/T1/fotos/01.jpg', 'U1/T1/fotos/02.jpg', 'U1/T1/fotos/03.jpg']), 'caminhos das fotos no padrão do banco: ' + p.fotos[0]);
 ok(p.participantes[1].assinatura_path === 'U1/T1/assinaturas/02.png' && p.participantes[0].cpf === '529.982.247-25', 'caminhos das assinaturas e CPF corretos');
 ok(p.cliente === 'ACME' && p.id === 'T1' && typeof p.criado_no_aparelho_em === 'string', 'payload limpo (cliente sem espaços, id, data do aparelho)');
-ok((await db.arquivosDe('T1')).length === 5, 'cópia local mantida depois do envio (cópia de segurança)');
+ok((await db.arquivosDe('T1')).length === 6, 'cópia local mantida depois do envio (fotos, assinaturas e PDF)');
 
 console.log('3) Queda no meio do envio: retoma sem reenviar o que já subiu');
 await criarTreinamento('T2', 'U1');
@@ -92,7 +103,7 @@ await sync.sincronizar({ ignorarEspera: true });
 ok(sb.uploads.length - antes === 2 && (await db.get('treinamentos', 'T2')).status === 'erro', 'parou na 3ª foto, 2 já no servidor');
 sb.falharUploadNo = null;
 await sync.sincronizar({ ignorarEspera: true });
-ok(sb.uploads.length - antes === 5, 'na retomada enviou só os 3 arquivos que faltavam (total 5, sem repetir)');
+ok(sb.uploads.length - antes === 6, 'na retomada enviou só o que faltava (total 6, sem repetir)');
 ok((await db.get('treinamentos', 'T2')).status === 'enviado', 'T2 enviado');
 
 console.log('4) Servidor recusa (validação): fica para correção, não insiste sozinho');
@@ -143,6 +154,17 @@ relogio += 8 * 24 * 60 * 60 * 1000;
 const n = await sync.limparEnviadosAntigos(7);
 ok(n >= 4 && !(await db.get('treinamentos', 'T1')) && (await db.arquivosDe('T1')).length === 0, `apaga enviados com mais de 7 dias e seus arquivos (${n})`);
 ok(!!(await db.get('treinamentos', 'T4')) && !!(await db.get('treinamentos', 'T7')) && !!(await db.get('treinamentos', 'T5')), 'NÃO apaga pendentes, com erro ou rascunhos');
+
+console.log('9b) Logo e PDF');
+ok(chamadasLogo === 1, 'logo carregada uma única vez por sessão do app');
+await criarTreinamento('T9', 'U1');
+sb.contUpload = 0; sb.falharUploadNo = 6; // falha justamente no upload do PDF
+await sync.sincronizar({ ignorarEspera: true });
+ok((await db.get('treinamentos', 'T9')).status === 'erro' && !sb.rpcs.some(x => x.args.p.id === 'T9'), 'se o PDF não sobe, não registra no banco');
+ok(!!(await db.get('arquivos', 'T9:pdf')), 'PDF gerado fica guardado no aparelho para a próxima tentativa');
+sb.falharUploadNo = null;
+await sync.sincronizar({ ignorarEspera: true });
+ok((await db.get('treinamentos', 'T9')).status === 'enviado', 'na nova tentativa sobe o PDF guardado e registra');
 
 console.log('10) Classificação de erros');
 ok(classificarErro({ message: 'TypeError: Failed to fetch' }).tipo === 'rede', 'Failed to fetch = rede');

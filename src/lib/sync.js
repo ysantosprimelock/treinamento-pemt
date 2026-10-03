@@ -29,8 +29,11 @@ function erroLocal(msg) {
   return e;
 }
 
-export function criarSync({ supabase, db, agora = () => Date.now() }) {
+// carregarLogo: função que devolve os bytes (Uint8Array) do PNG da logo, ou null
+export function criarSync({ supabase, db, agora = () => Date.now(), carregarLogo = async () => null }) {
   let rodando = false;
+  let instrutor = { uid: null, nome: '' };
+  let logoCache;
 
   async function subir(arquivo, caminho, tipo) {
     if (arquivo.enviadoPath === caminho) return; // já está no servidor
@@ -68,6 +71,27 @@ export function criarSync({ supabase, db, agora = () => Date.now() }) {
       participantes.push({ nome: o.nome.trim(), cpf: o.cpf, funcao: (o.funcao || '').trim(), assinatura_path: caminho });
     }
 
+    // Lista de presença em PDF (gerada no aparelho com os mesmos dados enviados ao banco)
+    const caminhoPdf = `${base}lista-presenca.pdf`;
+    let pdf = await db.get('arquivos', `${t.id}:pdf`);
+    if (!pdf) {
+      if (logoCache === undefined) logoCache = await carregarLogo();
+      const { gerarListaPresenca } = await import('./pdf.js');
+      const bytesDe = async chave => new Uint8Array(await arquivos[chave].blob.arrayBuffer());
+      const assinBytes = [];
+      for (const o of t.operadores) assinBytes.push(await bytesDe(t.assinaturas[o.k]));
+      const fotosBytes = [];
+      for (const c of t.fotos) fotosBytes.push(await bytesDe(c));
+      const bytes = await gerarListaPresenca({
+        id: t.id, cliente: t.cliente.trim(), cidade: t.cidade.trim(), uf: t.uf, data: t.data,
+        instrutor: instrutor.nome, fabricantes: t.fabricantes, maquinas: t.maquinas,
+        operadores: t.operadores.map(o => ({ nome: o.nome.trim(), cpf: o.cpf }))
+      }, assinBytes, fotosBytes, logoCache, new Date(agora()));
+      pdf = { chave: `${t.id}:pdf`, treinamentoId: t.id, tipo: 'pdf', blob: new Blob([bytes], { type: 'application/pdf' }) };
+      await db.put('arquivos', pdf);
+    }
+    await subir(pdf, caminhoPdf, 'application/pdf');
+
     const payload = {
       id: t.id,
       cliente: t.cliente.trim(),
@@ -103,6 +127,13 @@ export function criarSync({ supabase, db, agora = () => Date.now() }) {
       const sessao = data && data.session;
       if (!sessao) return { enviados: 0, falhas: 0, semSessao: true, msg: 'Entre novamente para enviar os pendentes.' };
       const uid = sessao.user.id;
+
+      // Nome do instrutor para a lista de presença (o mesmo que o banco grava)
+      if (instrutor.uid !== uid) {
+        const { data: perfil, error: errPerfil } = await supabase.from('perfis').select('nome').eq('id', uid).maybeSingle();
+        if (errPerfil) return { enviados: 0, falhas: 0, msg: classificarErro(errPerfil).msg };
+        instrutor = { uid, nome: (perfil && perfil.nome) || sessao.user.email || '' };
+      }
 
       const fila = (await db.todos('treinamentos'))
         .filter(t => t.userId === uid && ['pronto', 'enviando', 'erro'].includes(t.status))

@@ -6,6 +6,13 @@ import { uuid, hoje, lsGet, lsSet } from './lib/util';
 import Login from './telas/Login';
 import Inicio from './telas/Inicio';
 import Editor from './telas/Editor';
+import { LOGO_URL } from './componentes/Cabecalho';
+
+async function carregarLogo() {
+  const r = await fetch(LOGO_URL, { cache: 'no-cache' });
+  if (!r.ok) throw new Error('Falha de rede ao carregar a logo (HTTP ' + r.status + ')');
+  return new Uint8Array(await r.arrayBuffer());
+}
 
 const LS_USUARIO = 'pemt.usuario';
 const LS_LISTAS = 'pemt.listas';
@@ -29,7 +36,7 @@ function Principal() {
   const [tela, setTela] = useState({ nome: 'inicio' });
   const [versao, setVersao] = useState(0);
   const [envio, setEnvio] = useState({ rodando: false, msg: '' });
-  const sync = useMemo(() => criarSync({ supabase, db }), []);
+  const sync = useMemo(() => criarSync({ supabase, db, carregarLogo }), []);
   const atualizar = useCallback(() => setVersao(v => v + 1), []);
 
   // Sessão
@@ -127,6 +134,7 @@ function Principal() {
   }
 
   async function corrigir(t) {
+    await db.del('arquivos', `${t.id}:pdf`); // a lista em PDF será gerada de novo com os dados corrigidos
     await db.put('treinamentos', { ...t, status: 'rascunho', erro: null, tipoErro: null, atualizadoEm: Date.now() });
     setTela({ nome: 'editar', id: t.id });
   }

@@ -5,6 +5,11 @@ import { UFS, uuid, nk, comUnico, palavras, fmtData } from '../lib/util';
 import { mascaraCpf, cpfValido } from '../lib/cpf';
 import { comprimir } from '../lib/imagem';
 import PadAssinatura from '../componentes/PadAssinatura';
+import Cabecalho from '../componentes/Cabecalho';
+
+// Campos que sempre ficam em MAIÚSCULAS
+const up = s => String(s || '').toLocaleUpperCase('pt-BR');
+const CAMPOS_MAIUSC = ['cliente', 'local', 'cidade'];
 
 const PASSOS = ['Turma', 'Fotos', 'Operadores', 'Assinar'];
 const FAB_PADRAO = ['Skyjack', 'Genie', 'JLG'];
@@ -103,7 +108,7 @@ export default function Editor({ id, listas, aoVoltar, aoFinalizar }) {
   }, [salvarAgora]);
 
   const alterar = fn => setT(prev => ({ ...prev, ...fn(prev), atualizadoEm: Date.now() }));
-  const setCampo = k => e => { const v = e.target.value; alterar(() => ({ [k]: v })); };
+  const setCampo = k => e => { const v = CAMPOS_MAIUSC.includes(k) ? up(e.target.value) : e.target.value; alterar(() => ({ [k]: v })); };
   const addUrl = (chave, blob) => setUrls(u => { const n = { ...u, [chave]: URL.createObjectURL(blob) }; urlsRef.current = n; return n; });
   const tirarUrl = chave => setUrls(u => { if (u[chave]) URL.revokeObjectURL(u[chave]); const n = { ...u }; delete n[chave]; urlsRef.current = n; return n; });
 
@@ -157,7 +162,8 @@ export default function Editor({ id, listas, aoVoltar, aoFinalizar }) {
 
   // ---------- Operadores ----------
   function mudarOp(k, campo, valor) {
-    alterar(prev => ({ operadores: prev.operadores.map(o => (o.k === k ? { ...o, [campo]: campo === 'cpf' ? mascaraCpf(valor) : valor } : o)) }));
+    const v = campo === 'cpf' ? mascaraCpf(valor) : campo === 'nome' ? up(valor) : valor;
+    alterar(prev => ({ operadores: prev.operadores.map(o => (o.k === k ? { ...o, [campo]: v } : o)) }));
   }
   async function removerOp(o) {
     if ((o.nome || o.cpf) && !confirm('Remover este operador?')) return;
@@ -181,7 +187,9 @@ export default function Editor({ id, listas, aoVoltar, aoFinalizar }) {
   async function finalizar() {
     const todos = [0, 1, 2, 3].flatMap(p => validar(p, t));
     if (todos.length) { setErros(todos); window.scrollTo({ top: 0 }); return; }
-    const final = { ...tRef.current, ...t, status: 'pronto', finalizadoEm: Date.now(), atualizadoEm: Date.now(), erro: null, tipoErro: null, proximaTentativa: 0 };
+    const base = { ...tRef.current, ...t };
+    const final = { ...base, cliente: up(base.cliente), local: up(base.local), cidade: up(base.cidade),
+      maquinas: base.maquinas.map(up), operadores: base.operadores.map(o => ({ ...o, nome: up(o.nome) })), status: 'pronto', finalizadoEm: Date.now(), atualizadoEm: Date.now(), erro: null, tipoErro: null, proximaTentativa: 0 };
     try {
       await db.put('treinamentos', final);
       tRef.current = final;
@@ -202,16 +210,15 @@ export default function Editor({ id, listas, aoVoltar, aoFinalizar }) {
 
   return (
     <>
-      <header className="cab">
-        <div className="faixa" aria-hidden="true" />
-        <div className="cab-linha">
-          <span className="cab-titulo">{t.cliente.trim() || 'Novo treinamento'}<span className="cab-sub">Salvo no aparelho</span></span>
-          <button type="button" className="cab-acao" onClick={async () => { await salvarAgora(); aoVoltar(); }}>Início</button>
-        </div>
+      <Cabecalho
+        titulo={t.cliente.trim() || 'Novo treinamento'}
+        sub={<span className="cab-sub">Salvo no aparelho</span>}
+        direita={<button type="button" className="cab-acao" onClick={async () => { await salvarAgora(); aoVoltar(); }}>Início</button>}
+      >
         <ol className="passos" aria-label="Etapas">
           {PASSOS.map((p, i) => <li key={p} className={i === passo ? 'on' : i < passo ? 'feito' : ''}>{i + 1} {p}</li>)}
         </ol>
-      </header>
+      </Cabecalho>
 
       <main>
         {erros.length > 0 && (
@@ -225,11 +232,11 @@ export default function Editor({ id, listas, aoVoltar, aoFinalizar }) {
           <>
             <section className="sec">
               <h2>Dados da turma</h2>
-              <label>Cliente (empresa)<input list="dl-clientes" autoComplete="off" value={t.cliente} onChange={setCampo('cliente')} /></label>
+              <label>Cliente (empresa)<input className="maiusc" list="dl-clientes" autoComplete="off" autoCapitalize="characters" value={t.cliente} onChange={setCampo('cliente')} /></label>
               <datalist id="dl-clientes">{(listas.clientes || []).map(c => <option key={c} value={c} />)}</datalist>
-              <label>Local do treinamento<input autoComplete="off" placeholder="Unidade, pátio, obra…" value={t.local} onChange={setCampo('local')} /></label>
+              <label>Local do treinamento<input className="maiusc" autoComplete="off" autoCapitalize="characters" placeholder="Unidade, pátio, obra…" value={t.local} onChange={setCampo('local')} /></label>
               <div className="dois">
-                <label>Cidade<input autoComplete="off" value={t.cidade} onChange={setCampo('cidade')} /></label>
+                <label>Cidade<input className="maiusc" autoComplete="off" autoCapitalize="characters" value={t.cidade} onChange={setCampo('cidade')} /></label>
                 <label>UF
                   <select value={t.uf} onChange={setCampo('uf')}>
                     <option value="">—</option>
@@ -265,9 +272,9 @@ export default function Editor({ id, listas, aoVoltar, aoFinalizar }) {
               <h2>Máquinas e modelos</h2>
               <p className="dica">Digite o modelo e toque em Adicionar. Os modelos usados ficam salvos para os próximos treinamentos.</p>
               <div className="add">
-                <input list="dl-maquinas" placeholder="Ex.: 3219, GS-1930…" autoComplete="off" value={novaMaq} onChange={e => setNovaMaq(e.target.value)}
-                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); alterar(prev => ({ maquinas: comUnico(prev.maquinas, novaMaq, listas.maquinas || []) })); setNovaMaq(''); } }} />
-                <button type="button" className="btn" onClick={() => { alterar(prev => ({ maquinas: comUnico(prev.maquinas, novaMaq, listas.maquinas || []) })); setNovaMaq(''); }}>Adicionar</button>
+                <input className="maiusc" list="dl-maquinas" placeholder="Ex.: 3219, GS-1930…" autoComplete="off" autoCapitalize="characters" value={novaMaq} onChange={e => setNovaMaq(up(e.target.value))}
+                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); alterar(prev => ({ maquinas: comUnico(prev.maquinas, up(novaMaq), (listas.maquinas || []).map(up)) })); setNovaMaq(''); } }} />
+                <button type="button" className="btn" onClick={() => { alterar(prev => ({ maquinas: comUnico(prev.maquinas, up(novaMaq), (listas.maquinas || []).map(up)) })); setNovaMaq(''); }}>Adicionar</button>
               </div>
               <datalist id="dl-maquinas">{(listas.maquinas || []).map(m => <option key={m} value={m} />)}</datalist>
               <ul className="tags">
@@ -315,7 +322,7 @@ export default function Editor({ id, listas, aoVoltar, aoFinalizar }) {
                     <b>Operador {i + 1}</b>
                     {t.operadores.length > 1 && <button type="button" className="link" onClick={() => removerOp(o)}>Remover</button>}
                   </div>
-                  <label>Nome completo<input autoComplete="off" autoCapitalize="words" value={o.nome} onChange={e => mudarOp(o.k, 'nome', e.target.value)} /></label>
+                  <label>Nome completo<input className="maiusc" autoComplete="off" autoCapitalize="characters" value={o.nome} onChange={e => mudarOp(o.k, 'nome', e.target.value)} /></label>
                   <div className="dois empilha">
                     <label>CPF<input inputMode="numeric" maxLength={14} placeholder="000.000.000-00" autoComplete="off" value={o.cpf} onChange={e => mudarOp(o.k, 'cpf', e.target.value)} /></label>
                     <label>Função (opcional)<input autoComplete="off" value={o.funcao} onChange={e => mudarOp(o.k, 'funcao', e.target.value)} /></label>

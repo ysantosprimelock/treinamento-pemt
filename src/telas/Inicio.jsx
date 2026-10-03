@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import * as db from '../lib/db';
 import { fmtData, fmtDataHora } from '../lib/util';
+import Cabecalho from '../componentes/Cabecalho';
 
 function situacao(t) {
   if (t.status === 'enviado') return { txt: 'Enviado', cls: 'ok' };
@@ -39,15 +40,11 @@ export default function Inicio({ usuario, nome, online, envio, versao, aoNovo, a
 
   return (
     <>
-      <header className="cab">
-        <div className="faixa" aria-hidden="true" />
-        <div className="cab-linha">
-          <span className="cab-titulo">{nome || 'Treinamento PEMT'}
-            <span className={`conex${online ? '' : ' off'}`}>{online ? 'Conectado' : 'Sem internet'}</span>
-          </span>
-          <button type="button" className="cab-acao" onClick={sair}>Sair</button>
-        </div>
-      </header>
+      <Cabecalho
+        titulo={nome || 'Treinamento PEMT'}
+        sub={<span className={`conex${online ? '' : ' off'}`}>{online ? 'Conectado' : 'Sem internet'}</span>}
+        direita={<button type="button" className="cab-acao" onClick={sair}>Sair</button>}
+      />
 
       <main>
         {usuario.offline && (
