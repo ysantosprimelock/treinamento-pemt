@@ -28,6 +28,12 @@ export function comUnico(lista, valor, base = []) {
   return [...lista, oficial || v];
 }
 
+// "A@x.com; b@y.com,  a@x.com" -> ['a@x.com', 'b@y.com'] (minúsculas, sem repetidos, na ordem)
+export function listaEmails(s) {
+  const vistos = new Set();
+  return String(s || '').toLowerCase().split(/[\s,;]+/).filter(e => e && !vistos.has(e) && vistos.add(e));
+}
+
 export function lsGet(k, padrao) {
   try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : padrao; } catch { return padrao; }
 }

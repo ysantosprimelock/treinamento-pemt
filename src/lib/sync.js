@@ -5,6 +5,7 @@
 //  * Arquivos já enviados não são reenviados (economiza dados em sinal fraco).
 //  * O mesmo treinamento reenviado nunca duplica (id gerado no aparelho + função idempotente no banco).
 import { BUCKET, DIAS_MANTER_ENVIADOS } from '../config.js';
+import { listaEmails } from './util.js';
 
 const pad2 = n => String(n).padStart(2, '0');
 const MINUTO = 60 * 1000;
@@ -99,7 +100,7 @@ export function criarSync({ supabase, db, agora = () => Date.now(), carregarLogo
       cidade: t.cidade.trim(),
       uf: t.uf,
       data: t.data,
-      email_cliente: t.emailCliente || '',
+      email_cliente: listaEmails(t.emailCliente).join(', '),
       criado_no_aparelho_em: new Date(t.criadoEm).toISOString(),
       fabricantes: t.fabricantes,
       maquinas: t.maquinas,

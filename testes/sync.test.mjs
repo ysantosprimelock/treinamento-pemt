@@ -94,6 +94,8 @@ ok(JSON.stringify(p.fotos) === JSON.stringify(['U1/T1/fotos/01.jpg', 'U1/T1/foto
 ok(p.participantes[1].assinatura_path === 'U1/T1/assinaturas/02.png' && p.participantes[0].cpf === '529.982.247-25', 'caminhos das assinaturas e CPF corretos');
 ok(p.cliente === 'ACME' && p.id === 'T1' && typeof p.criado_no_aparelho_em === 'string', 'payload limpo (cliente sem espaços, id, data do aparelho)');
 ok(p.email_cliente === '', 'payload envia e-mail do cliente (vazio quando não informado)');
+const { listaEmails } = await import('../src/lib/util.js');
+ok(listaEmails(' A@x.com; b@y.com,,a@X.com  c@z.com ').join(', ') === 'a@x.com, b@y.com, c@z.com', 'lista de e-mails normalizada (separadores, repetidos, minúsculas)');
 ok((await db.arquivosDe('T1')).length === 6, 'cópia local mantida depois do envio (fotos, assinaturas e PDF)');
 
 console.log('3) Queda no meio do envio: retoma sem reenviar o que já subiu');

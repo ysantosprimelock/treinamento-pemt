@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import * as db from '../lib/db';
 import { MIN_FOTOS, MAX_FOTOS } from '../config';
-import { UFS, uuid, nk, comUnico, palavras, fmtData } from '../lib/util';
+import { UFS, uuid, nk, comUnico, palavras, fmtData, listaEmails } from '../lib/util';
 import { mascaraCpf, cpfValido } from '../lib/cpf';
 import { comprimir } from '../lib/imagem';
 import PadAssinatura from '../componentes/PadAssinatura';
@@ -23,7 +23,10 @@ export function validar(passo, t) {
     if (!t.cidade.trim()) e.push('Informe a cidade.');
     if (!t.uf) e.push('Selecione a UF.');
     if (!t.data) e.push('Informe a data.');
-    if (t.emailCliente && !emailValido(t.emailCliente)) e.push('E-mail do cliente inválido. Confira ou deixe em branco.');
+    const emails = listaEmails(t.emailCliente);
+    const ruins = emails.filter(x => !emailValido(x));
+    if (ruins.length) e.push(`E-mail do cliente inválido: ${ruins.join(', ')}. Confira ou apague.`);
+    if (emails.length > 10) e.push('Informe no máximo 10 e-mails do cliente.');
     if (!t.fabricantes.length) e.push('Marque ao menos um fabricante.');
     if (!t.maquinas.length) e.push('Adicione ao menos uma máquina ou modelo.');
   }
@@ -190,7 +193,7 @@ export default function Editor({ id, listas, aoVoltar, aoFinalizar }) {
     const todos = [0, 1, 2, 3].flatMap(p => validar(p, t));
     if (todos.length) { setErros(todos); window.scrollTo({ top: 0 }); return; }
     const base = { ...tRef.current, ...t };
-    const final = { ...base, cliente: up(base.cliente), local: up(base.local), cidade: up(base.cidade),
+    const final = { ...base, cliente: up(base.cliente), local: up(base.local), cidade: up(base.cidade), emailCliente: listaEmails(base.emailCliente).join(', '),
       maquinas: base.maquinas.map(up), operadores: base.operadores.map(o => ({ ...o, nome: up(o.nome) })), status: 'pronto', finalizadoEm: Date.now(), atualizadoEm: Date.now(), erro: null, tipoErro: null, proximaTentativa: 0 };
     try {
       await db.put('treinamentos', final);
@@ -247,12 +250,15 @@ export default function Editor({ id, listas, aoVoltar, aoFinalizar }) {
                 </label>
               </div>
               <label>Data<input type="date" value={t.data} onChange={setCampo('data')} /></label>
-              <label>E-mail do cliente (envio dos certificados)
-                <input type="email" inputMode="email" autoComplete="off" autoCapitalize="off" spellCheck={false} placeholder="compras@cliente.com.br"
-                  value={t.emailCliente || ''} onChange={e => { const v = e.target.value.trim().toLowerCase(); alterar(() => ({ emailCliente: v })); }} />
+              <label>E-mails do cliente (envio dos certificados)
+                <input type="text" inputMode="email" autoComplete="off" autoCapitalize="off" spellCheck={false} placeholder="compras@cliente.com.br, sst@cliente.com.br"
+                  value={t.emailCliente || ''} onChange={e => { const v = e.target.value.toLowerCase(); alterar(() => ({ emailCliente: v })); }} />
               </label>
-              {t.emailCliente && !emailValido(t.emailCliente) && <span className="erro-campo">E-mail incompleto ou inválido.</span>}
-              <p className="dica" style={{ marginTop: 4 }}>Opcional. Sem e-mail, os certificados vão só para a Kimtech.</p>
+              {(() => {
+                const ruins = listaEmails(t.emailCliente).filter(x => !emailValido(x));
+                return ruins.length ? <span className="erro-campo">E-mail incompleto ou inválido: {ruins.join(', ')}</span> : null;
+              })()}
+              <p className="dica" style={{ marginTop: 4 }}>Para mais de um, separe por vírgula. Opcional: sem e-mail, os certificados vão só para a Kimtech.</p>
             </section>
 
             <section className="sec">
@@ -351,7 +357,7 @@ export default function Editor({ id, listas, aoVoltar, aoFinalizar }) {
                 <dt>Cliente</dt><dd>{t.cliente}</dd>
                 <dt>Local</dt><dd>{t.local} — {t.cidade}/{t.uf}</dd>
                 <dt>Data</dt><dd>{fmtData(t.data)}</dd>
-                <dt>E-mail</dt><dd>{t.emailCliente || 'não informado (só Kimtech)'}</dd>
+                <dt>E-mails</dt><dd>{listaEmails(t.emailCliente).join(', ') || 'não informado (só Kimtech)'}</dd>
                 <dt>Fabricantes</dt><dd>{t.fabricantes.join(' / ')}</dd>
                 <dt>Máquinas</dt><dd>{t.maquinas.join(' / ')}</dd>
                 <dt>Fotos</dt><dd>{t.fotos.length}</dd>
