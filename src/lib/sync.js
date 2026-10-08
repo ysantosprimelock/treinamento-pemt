@@ -6,6 +6,7 @@
 //  * O mesmo treinamento reenviado nunca duplica (id gerado no aparelho + função idempotente no banco).
 import { BUCKET, DIAS_MANTER_ENVIADOS } from '../config.js';
 import { listaEmails } from './util.js';
+import { garantirProva, resultadoFinal } from '../prova/index.js';
 
 const pad2 = n => String(n).padStart(2, '0');
 const MINUTO = 60 * 1000;
@@ -72,6 +73,51 @@ export function criarSync({ supabase, db, agora = () => Date.now(), carregarLogo
       participantes.push({ nome: o.nome.trim(), cpf: o.cpf, funcao: (o.funcao || '').trim(), assinatura_path: caminho });
     }
 
+    // Provas: comprovante em PDF de quem respondeu a prova (QR ou papel) + avaliação para o banco.
+    // A decisão do instrutor (Aprovar/Reprovar) vale sobre a nota; o comprovante mostra as respostas
+    // e a nota reais, com o resultado final, e não menciona a decisão. Quem não fez prova não tem comprovante.
+    // Treinamentos finalizados em versões antigas do app não têm "provas": seguem como antes.
+    const provas = t.provas || {};
+    const decisoes = t.decisoes || {};
+    const finais = t.operadores.map(o => resultadoFinal(provas[o.k], decisoes[o.k]));
+    for (let i = 0; i < t.operadores.length; i++) {
+      const o = t.operadores[i];
+      const r = provas[o.k] && (provas[o.k].modo === 'qr' || provas[o.k].modo === 'papel') ? provas[o.k] : null;
+      const d = decisoes[o.k] && typeof decisoes[o.k].aprovado === 'boolean' ? decisoes[o.k] : null;
+      if (!r && !d) continue;
+      const decisao = d ? d.aprovado : null;
+      if (!r) {
+        participantes[i].avaliacao = { modo: 'instrutor', decisao_instrutor: decisao, em: new Date(d.em || agora()).toISOString() };
+        continue;
+      }
+      const chave = `${t.id}:comp:${o.k}`;
+      let comp = await db.get('arquivos', chave);
+      if (!comp) {
+        if (logoCache === undefined) logoCache = await carregarLogo();
+        const { gerarComprovante } = await import('./provaPdf.js');
+        const bytesDe = async c => (c && arquivos[c] ? new Uint8Array(await arquivos[c].blob.arrayBuffer()) : null);
+        const fotosDaFolha = async pr => {
+          const chaves = Array.isArray(pr.folhas) ? pr.folhas : pr.folha ? [pr.folha] : [];
+          const lista = [];
+          for (const c of chaves) { const b = await bytesDe(c); if (b) lista.push(b); }
+          return lista;
+        };
+        const bytes = await gerarComprovante({
+          prova: await garantirProva(supabase, r.provaId), cliente: t.cliente.trim(), cidade: t.cidade.trim(), uf: t.uf, data: t.data,
+          instrutor: instrutor.nome, fabricantes: t.fabricantes, maquinas: t.maquinas,
+          operador: { nome: o.nome.trim(), cpf: o.cpf }, resultado: { ...r, aprovado: finais[i] === true }
+        }, logoCache, await bytesDe(t.assinaturas[o.k]), r.modo === 'papel' ? await fotosDaFolha(r) : [], new Date(agora()));
+        comp = { chave, treinamentoId: t.id, tipo: 'comprovante', blob: new Blob([bytes], { type: 'application/pdf' }) };
+        await db.put('arquivos', comp);
+      }
+      const caminho = `${base}provas/${pad2(i + 1)}.pdf`;
+      await subir(comp, caminho, 'application/pdf');
+      const em = r.em ? new Date(r.em).toISOString() : null;
+      participantes[i].avaliacao = r.modo === 'qr'
+        ? { modo: 'qr', tentativa_id: r.tentativaId, em, comprovante_path: caminho, decisao_instrutor: decisao }
+        : { modo: 'papel', prova_id: r.provaId, respostas: r.respostas, em, comprovante_path: caminho, decisao_instrutor: decisao };
+    }
+
     // Lista de presença em PDF (gerada no aparelho com os mesmos dados enviados ao banco)
     const caminhoPdf = `${base}lista-presenca.pdf`;
     let pdf = await db.get('arquivos', `${t.id}:pdf`);
@@ -86,7 +132,7 @@ export function criarSync({ supabase, db, agora = () => Date.now(), carregarLogo
       const bytes = await gerarListaPresenca({
         id: t.id, cliente: t.cliente.trim(), cidade: t.cidade.trim(), uf: t.uf, data: t.data,
         instrutor: instrutor.nome, fabricantes: t.fabricantes, maquinas: t.maquinas,
-        operadores: t.operadores.map(o => ({ nome: o.nome.trim(), cpf: o.cpf }))
+        operadores: t.operadores.map((o, i) => ({ nome: o.nome.trim(), cpf: o.cpf, aprovado: finais[i] === null ? undefined : finais[i] }))
       }, assinBytes, fotosBytes, logoCache, new Date(agora()));
       pdf = { chave: `${t.id}:pdf`, treinamentoId: t.id, tipo: 'pdf', blob: new Blob([bytes], { type: 'application/pdf' }) };
       await db.put('arquivos', pdf);

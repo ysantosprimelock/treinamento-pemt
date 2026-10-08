@@ -20,7 +20,10 @@ function supabaseFalso() {
     erroRpc: null,
     contUpload: 0,
     auth: { getSession: async () => ({ data: { session: s.sessao } }) },
-    from: tabela => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: tabela === 'perfis' ? { nome: 'INSTRUTOR 01 TESTE' } : null, error: null }) }) }) }),
+    provasBanco: [], leiturasProva: 0,
+    from: tabela => tabela === 'provas'
+      ? { select: () => ({ order: async () => { s.leiturasProva++; return { data: s.provasBanco, error: null }; } }) }
+      : ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: tabela === 'perfis' ? { nome: 'INSTRUTOR 01 TESTE' } : null, error: null }) }) }) }),
     storage: { from: (bucket) => ({ upload: async (caminho, blob, op) => {
       s.contUpload++;
       if (s.falharUploadNo && s.contUpload === s.falharUploadNo) return { data: null, error: s.erroUpload };
@@ -168,6 +171,70 @@ ok(!!(await db.get('arquivos', 'T9:pdf')), 'PDF gerado fica guardado no aparelho
 sb.falharUploadNo = null;
 await sync.sincronizar({ ignorarEspera: true });
 ok((await db.get('treinamentos', 'T9')).status === 'enviado', 'na nova tentativa sobe o PDF guardado e registra');
+
+console.log('9c) Provas: comprovantes e avaliações');
+const { PROVA_PEMT } = await import('../../tools/prova-pemt.js');
+const { _limparProvas, provaPorId } = await import('../src/prova/index.js');
+const { execFileSync } = await import('node:child_process');
+_limparProvas(); // aparelho ainda sem a prova: o envio baixa do banco
+sb.provasBanco = [{ id: PROVA_PEMT.id, titulo: PROVA_PEMT.titulo, nota_minima: '0.700', questoes: PROVA_PEMT.questoes, criada_em: '2026-10-08' }];
+await criarTreinamento('P1', 'U1', 3, 3);
+const resp8 = PROVA_PEMT.questoes.map((q, i) => (i < 8 ? q.c : (q.c + 1) % 4));
+const resp6 = PROVA_PEMT.questoes.map((q, i) => (i < 6 ? q.c : (q.c + 1) % 4));
+await db.put('arquivos', { chave: 'P1:folha:op1:x-0', treinamentoId: 'P1', tipo: 'folha', blob: new Blob([fx('foto-2.jpg')], { type: 'image/jpeg' }) });
+await db.put('arquivos', { chave: 'P1:folha:op1:x-1', treinamentoId: 'P1', tipo: 'folha', blob: new Blob([fx('foto-3.jpg')], { type: 'image/jpeg' }) });
+let p1 = await db.get('treinamentos', 'P1');
+await db.put('treinamentos', { ...p1,
+  provas: {
+    op0: { modo: 'qr', provaId: 'PEMT-1', tentativaId: 'TT1', respostas: resp8, acertos: 8, total: 10, aprovado: true, em: relogio },
+    op1: { modo: 'papel', provaId: 'PEMT-1', respostas: resp6, acertos: 6, total: 10, aprovado: false, em: relogio, folhas: ['P1:folha:op1:x-0', 'P1:folha:op1:x-1'], lidoPorFoto: true }
+  },
+  decisoes: {
+    op1: { aprovado: true, em: relogio },  // fez a prova, não passou, instrutor aprovou
+    op2: { aprovado: false, em: relogio }  // não fez prova, instrutor reprovou
+  } });
+const upAntes = sb.uploads.length;
+sb.contUpload = 0; sb.falharUploadNo = 8; // 3 fotos + 3 assinaturas + 1º comprovante sobem; o 2º falha
+await sync.sincronizar({ ignorarEspera: true });
+ok((await db.get('treinamentos', 'P1')).status === 'erro' && !sb.rpcs.some(x => x.args.p.id === 'P1'), 'falha no meio dos comprovantes: não registra');
+ok(!!(await db.get('arquivos', 'P1:comp:op0')) && !!(await db.get('arquivos', 'P1:comp:op1')), 'comprovantes gerados ficam guardados no aparelho');
+ok(sb.leiturasProva === 1 && !!provaPorId('PEMT-1'), 'prova que não estava no aparelho foi baixada do banco (uma vez)');
+sb.falharUploadNo = null;
+await sync.sincronizar({ ignorarEspera: true });
+ok((await db.get('treinamentos', 'P1')).status === 'enviado', 'na retomada envia e registra');
+const novos = sb.uploads.slice(upAntes).map(u => u.caminho);
+ok(['U1/P1/provas/01.pdf', 'U1/P1/provas/02.pdf'].every(c => novos.filter(x => x === c).length === 1), 'um comprovante por prova respondida em U1/P1/provas/NN.pdf, sem reenviar');
+ok(!novos.includes('U1/P1/provas/03.pdf') && !(await db.get('arquivos', 'P1:comp:op2')), 'quem não fez prova não tem comprovante');
+const pp = sb.rpcs.find(x => x.args.p.id === 'P1').args.p;
+const [a0, a1, a2] = pp.participantes.map(x => x.avaliacao);
+ok(a0.modo === 'qr' && a0.tentativa_id === 'TT1' && a0.comprovante_path === 'U1/P1/provas/01.pdf' && !('respostas' in a0) && a0.decisao_instrutor === null, 'QR: envia só a tentativa (o banco usa a resposta guardada nele), sem decisão');
+ok(a1.modo === 'papel' && a1.prova_id === 'PEMT-1' && a1.respostas.join() === resp6.join() && !('acertos' in a1) && a1.decisao_instrutor === true, 'papel: envia as respostas reais (o banco corrige de novo) e a decisão do instrutor');
+ok(a2.modo === 'instrutor' && a2.decisao_instrutor === false && !('comprovante_path' in a2) && typeof a2.em === 'string', 'sem prova: envia só a decisão do instrutor');
+const docComp = async c => PDFDocument.load(new Uint8Array(await sb.uploads.find(u => u.caminho === c).blob.arrayBuffer()));
+ok((await docComp('U1/P1/provas/01.pdf')).getPageCount() === 1, 'comprovante QR: PDF válido de 1 página');
+const nPagPapel = (await docComp('U1/P1/provas/02.pdf')).getPageCount();
+ok(nPagPapel === 3, `comprovante papel: respostas + uma página por foto da folha (${nPagPapel} páginas)`);
+const listaP1 = sb.uploads.filter(u => u.caminho === 'U1/P1/lista-presenca.pdf').pop();
+const arqLista = new URL('./.lista-com-resultado.pdf', import.meta.url), arqComp = new URL('./.comprovante-papel.pdf', import.meta.url);
+fs.writeFileSync(arqLista, new Uint8Array(await listaP1.blob.arrayBuffer()));
+fs.writeFileSync(arqComp, new Uint8Array(await sb.uploads.find(u => u.caminho === 'U1/P1/provas/02.pdf').blob.arrayBuffer()));
+fs.writeFileSync(new URL('./.comprovante-qr.pdf', import.meta.url), new Uint8Array(await sb.uploads.find(u => u.caminho === 'U1/P1/provas/01.pdf').blob.arrayBuffer()));
+let txtComp = '', txtLista = '';
+try {
+  txtComp = execFileSync('pdftotext', ['-layout', arqComp.pathname, '-'], { encoding: 'utf8' });
+  txtLista = execFileSync('pdftotext', ['-layout', arqLista.pathname, '-'], { encoding: 'utf8' });
+} catch { /* sem pdftotext */ }
+if (txtComp) {
+  ok(/RESULTADO: APROVADO/.test(txtComp) && /Acertos: 6 de 10/.test(txtComp), 'comprovante da aprovação pelo instrutor: nota real (6 de 10) e resultado APROVADO');
+  ok(!/aprovad[oa] (manualmente|pelo instrutor)|decis[aã]o do instrutor|aprova[cç][aã]o manual/i.test(txtComp), 'comprovante não menciona decisão/aprovação manual');
+  ok(/Forma de aplica..o: Prova em papel/.test(txtComp), 'comprovante informa a forma de aplicação (papel)');
+  const linhas = txtLista.split('\n');
+  const linhaDe = n => linhas.find(l => l.includes(n)) || '';
+  ok(/APROVADO/.test(linhaDe('Operador 0 Silva')) && /APROVADO/.test(linhaDe('Operador 1 Silva')) && /REPROVADO/.test(linhaDe('Operador 2 Silva')), 'lista de presença: resultado final de cada operador');
+} else ok(false, 'pdftotext indisponível para conferir o texto dos PDFs');
+ok(!pp.participantes.some(x => 'aprovado' in x), 'payload sem campo "aprovado" solto (o banco decide)');
+const t1Antigo = sb.rpcs.find(x => x.args.p.id === 'T2').args.p;
+ok(t1Antigo.participantes.every(x => !('avaliacao' in x)), 'treinamento sem prova (versão antiga) segue sem avaliação');
 
 console.log('10) Classificação de erros');
 ok(classificarErro({ message: 'TypeError: Failed to fetch' }).tipo === 'rede', 'Failed to fetch = rede');

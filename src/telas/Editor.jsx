@@ -6,13 +6,17 @@ import { mascaraCpf, cpfValido } from '../lib/cpf';
 import { comprimir } from '../lib/imagem';
 import PadAssinatura from '../componentes/PadAssinatura';
 import Cabecalho from '../componentes/Cabecalho';
+import EtapaProva, { textoResultado } from '../componentes/EtapaProva';
+import { resultadoFinal } from '../prova/correcao.js';
 
 // Campos que sempre ficam em MAIÚSCULAS
 const up = s => String(s || '').toLocaleUpperCase('pt-BR');
 const CAMPOS_MAIUSC = ['cliente', 'local', 'cidade'];
 export const emailValido = v => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v);
 
-const PASSOS = ['Turma', 'Fotos', 'Operadores', 'Assinar'];
+// Ordem do fluxo: operadores (CPF) antes de tudo, porque a prova é ligada ao CPF
+const PASSOS = ['Turma', 'Operadores', 'Fotos', 'Prova', 'Assinar'];
+const ULTIMO = PASSOS.length - 1;
 const FAB_PADRAO = ['Skyjack', 'Genie', 'JLG'];
 
 export function validar(passo, t) {
@@ -30,10 +34,10 @@ export function validar(passo, t) {
     if (!t.fabricantes.length) e.push('Marque ao menos um fabricante.');
     if (!t.maquinas.length) e.push('Adicione ao menos uma máquina ou modelo.');
   }
-  if (passo === 1) {
+  if (passo === 2) {
     if (t.fotos.length < MIN_FOTOS || t.fotos.length > MAX_FOTOS) e.push(`Adicione de ${MIN_FOTOS} a ${MAX_FOTOS} fotos (agora: ${t.fotos.length}).`);
   }
-  if (passo === 2) {
+  if (passo === 1) {
     const vistos = {};
     if (!t.operadores.length) e.push('Adicione ao menos um operador.');
     t.operadores.forEach((o, i) => {
@@ -49,6 +53,11 @@ export function validar(passo, t) {
     });
   }
   if (passo === 3) {
+    const provas = t.provas || {}, decisoes = t.decisoes || {};
+    const sem = t.operadores.filter(o => resultadoFinal(provas[o.k], decisoes[o.k]) === null);
+    if (sem.length) e.push(`Falta o resultado da prova de ${sem.length} operador(es): ${sem.map(o => o.nome || 'sem nome').join(', ')}. Aplique a prova (QR code ou papel) ou toque em Aprovar/Reprovar.`);
+  }
+  if (passo === 4) {
     const faltam = t.operadores.filter(o => !(t.assinaturas || {})[o.k]);
     if (faltam.length) e.push(`Faltam ${faltam.length} assinatura(s): ${faltam.map(o => o.nome).join(', ')}.`);
   }
@@ -57,7 +66,7 @@ export function validar(passo, t) {
 
 const novoOp = () => ({ k: uuid(), nome: '', cpf: '', funcao: '' });
 
-export default function Editor({ id, listas, aoVoltar, aoFinalizar }) {
+export default function Editor({ id, listas, aoVoltar, aoFinalizar, api = null, online = false, carregarLogo = null, lerFoto = null, obterMapa = null }) {
   const [t, setT] = useState(null);
   const [passo, setPasso] = useState(0);
   const [erros, setErros] = useState([]);
@@ -168,7 +177,16 @@ export default function Editor({ id, listas, aoVoltar, aoFinalizar }) {
   // ---------- Operadores ----------
   function mudarOp(k, campo, valor) {
     const v = campo === 'cpf' ? mascaraCpf(valor) : campo === 'nome' ? up(valor) : valor;
-    alterar(prev => ({ operadores: prev.operadores.map(o => (o.k === k ? { ...o, [campo]: v } : o)) }));
+    alterar(prev => {
+      const res = { operadores: prev.operadores.map(o => (o.k === k ? { ...o, [campo]: v } : o)) };
+      // resultado pelo QR code é ligado ao CPF: se o CPF mudar, o resultado deixa de valer
+      const r = (prev.provas || {})[k];
+      const antes = prev.operadores.find(o => o.k === k);
+      if (campo === 'cpf' && r && r.modo === 'qr' && antes && antes.cpf.replace(/\D/g, '') !== v.replace(/\D/g, '')) {
+        const p = { ...prev.provas }; delete p[k]; res.provas = p;
+      }
+      return res;
+    });
   }
   async function removerOp(o) {
     if ((o.nome || o.cpf) && !confirm('Remover este operador?')) return;
@@ -176,9 +194,14 @@ export default function Editor({ id, listas, aoVoltar, aoFinalizar }) {
     alterar(prev => {
       const a = { ...(prev.assinaturas || {}) };
       delete a[o.k];
-      return { operadores: prev.operadores.filter(x => x.k !== o.k), assinaturas: a };
+      const p = { ...(prev.provas || {}) };
+      delete p[o.k];
+      const d = { ...(prev.decisoes || {}) };
+      delete d[o.k];
+      return { operadores: prev.operadores.filter(x => x.k !== o.k), assinaturas: a, provas: p, decisoes: d };
     });
     if (chave) { tirarUrl(chave); await db.del('arquivos', chave); }
+    for (const a of await db.arquivosDe(id).catch(() => [])) if (a.chave.startsWith(`${id}:folha:${o.k}`)) await db.del('arquivos', a.chave).catch(() => {});
   }
 
   // ---------- Navegação ----------
@@ -186,11 +209,11 @@ export default function Editor({ id, listas, aoVoltar, aoFinalizar }) {
     const e = validar(passo, t);
     setErros(e);
     if (e.length) { window.scrollTo({ top: 0 }); return; }
-    if (passo < 3) { setPasso(passo + 1); window.scrollTo({ top: 0 }); return; }
+    if (passo < ULTIMO) { setPasso(passo + 1); window.scrollTo({ top: 0 }); return; }
     finalizar();
   }
   async function finalizar() {
-    const todos = [0, 1, 2, 3].flatMap(p => validar(p, t));
+    const todos = PASSOS.flatMap((_, p) => validar(p, t));
     if (todos.length) { setErros(todos); window.scrollTo({ top: 0 }); return; }
     const base = { ...tRef.current, ...t };
     const final = { ...base, cliente: up(base.cliente), local: up(base.local), cidade: up(base.cidade), emailCliente: listaEmails(base.emailCliente).join(', '),
@@ -302,7 +325,7 @@ export default function Editor({ id, listas, aoVoltar, aoFinalizar }) {
           </>
         )}
 
-        {passo === 1 && (
+        {passo === 2 && (
           <section className="sec">
             <h2>Fotos do treinamento</h2>
             <p className="dica">De {MIN_FOTOS} a {MAX_FOTOS} fotos: turma, operadores e máquinas. Servem como registro documental.</p>
@@ -324,7 +347,7 @@ export default function Editor({ id, listas, aoVoltar, aoFinalizar }) {
           </section>
         )}
 
-        {passo === 2 && (
+        {passo === 1 && (
           <section className="sec">
             <h2>Operadores</h2>
             <p className="dica">Um bloco por operador, sem limite de quantidade. CPF no formato 000.000.000-00.</p>
@@ -349,7 +372,9 @@ export default function Editor({ id, listas, aoVoltar, aoFinalizar }) {
           </section>
         )}
 
-        {passo === 3 && (
+        {passo === 3 && <EtapaProva id={id} t={t} alterar={alterar} api={api} online={online} carregarLogo={carregarLogo} lerFoto={lerFoto} obterMapa={obterMapa} />}
+
+        {passo === 4 && (
           <>
             <section className="sec">
               <h2>Resumo</h2>
@@ -361,17 +386,19 @@ export default function Editor({ id, listas, aoVoltar, aoFinalizar }) {
                 <dt>Fabricantes</dt><dd>{t.fabricantes.join(' / ')}</dd>
                 <dt>Máquinas</dt><dd>{t.maquinas.join(' / ')}</dd>
                 <dt>Fotos</dt><dd>{t.fotos.length}</dd>
+                <dt>Prova</dt><dd>{t.operadores.filter(o => resultadoFinal((t.provas || {})[o.k], (t.decisoes || {})[o.k]) === true).length} aprovado(s) de {t.operadores.length}</dd>
               </dl>
             </section>
             <section className="sec">
               <h2>Assinaturas</h2>
-              <p className="dica">{nAssin} de {t.operadores.length} assinaturas coletadas.</p>
+              <p className="dica">{nAssin} de {t.operadores.length} assinaturas coletadas. Todos assinam a lista de presença, inclusive quem foi reprovado; certificado só para aprovados.</p>
               <ul className="assin">
                 {t.operadores.map(o => {
                   const chave = (t.assinaturas || {})[o.k];
+                  const res = textoResultado((t.provas || {})[o.k], (t.decisoes || {})[o.k]);
                   return (
                     <li key={o.k}>
-                      <div><b>{o.nome}</b><small>{o.cpf}</small></div>
+                      <div><b>{o.nome}</b><small>{o.cpf}</small><small className={`res ${res.cls}`}>{res.txt}</small></div>
                       {chave && urls[chave] && <img src={urls[chave]} alt={`Assinatura de ${o.nome}`} />}
                       <button type="button" className={`btn peq${chave ? '' : ' prim'}`} onClick={() => setAssinando(o.k)}>{chave ? 'Refazer' : 'Assinar'}</button>
                     </li>
@@ -386,7 +413,7 @@ export default function Editor({ id, listas, aoVoltar, aoFinalizar }) {
 
       <nav className="barra">
         {passo > 0 && <button type="button" className="btn voltar" onClick={() => { setErros([]); setPasso(passo - 1); window.scrollTo({ top: 0 }); }}>Voltar</button>}
-        <button type="button" className="btn prim" onClick={avancar} disabled={!!processando}>{passo === 3 ? 'Finalizar e enviar' : 'Avançar'}</button>
+        <button type="button" className="btn prim" onClick={avancar} disabled={!!processando}>{passo === ULTIMO ? 'Finalizar e enviar' : 'Avançar'}</button>
       </nav>
 
       {assinando && (

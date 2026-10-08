@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase, configurado } from './supabase';
 import * as db from './lib/db';
 import { criarSync } from './lib/sync';
+import { criarProvaApi } from './lib/provaApi';
+import { baixarProvas } from './prova/index.js';
 import { uuid, hoje, lsGet, lsSet } from './lib/util';
 import Login from './telas/Login';
 import Inicio from './telas/Inicio';
@@ -37,6 +39,7 @@ function Principal() {
   const [versao, setVersao] = useState(0);
   const [envio, setEnvio] = useState({ rodando: false, msg: '' });
   const sync = useMemo(() => criarSync({ supabase, db, carregarLogo }), []);
+  const provaApi = useMemo(() => criarProvaApi(supabase), []);
   const atualizar = useCallback(() => setVersao(v => v + 1), []);
 
   // Sessão
@@ -81,6 +84,8 @@ function Principal() {
         lsSet(LS_LISTAS, l);
         setListas(l);
       }
+      // Prova (questões e gabarito): fica guardada no aparelho para aplicar e corrigir sem internet
+      await baixarProvas(supabase);
     })().catch(err => console.error(err));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uid, online]);
@@ -127,7 +132,7 @@ function Principal() {
     const t = {
       id: uuid(), userId: usuario.id, status: 'rascunho', criadoEm: Date.now(), atualizadoEm: Date.now(),
       cliente: '', local: '', cidade: '', uf: '', data: hoje(), emailCliente: '', fabricantes: [], maquinas: [],
-      fotos: [], operadores: [{ k: uuid(), nome: '', cpf: '', funcao: '' }], assinaturas: {}
+      fotos: [], operadores: [{ k: uuid(), nome: '', cpf: '', funcao: '' }], assinaturas: {}, provas: {}, decisoes: {}, provaSessao: null
     };
     await db.put('treinamentos', t);
     setTela({ nome: 'editar', id: t.id });
@@ -135,6 +140,7 @@ function Principal() {
 
   async function corrigir(t) {
     await db.del('arquivos', `${t.id}:pdf`); // a lista em PDF será gerada de novo com os dados corrigidos
+    for (const a of await db.arquivosDe(t.id)) if (a.tipo === 'comprovante') await db.del('arquivos', a.chave); // idem comprovantes
     await db.put('treinamentos', { ...t, status: 'rascunho', erro: null, tipoErro: null, atualizadoEm: Date.now() });
     setTela({ nome: 'editar', id: t.id });
   }
@@ -145,6 +151,9 @@ function Principal() {
         key={tela.id}
         id={tela.id}
         listas={listas}
+        api={usuario.offline ? null : provaApi}
+        online={online && !usuario.offline}
+        carregarLogo={carregarLogo}
         aoVoltar={() => { setTela({ nome: 'inicio' }); atualizar(); }}
         aoFinalizar={() => { setTela({ nome: 'inicio' }); atualizar(); enviar({ ignorarEspera: true }); }}
       />

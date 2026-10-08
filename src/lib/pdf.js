@@ -22,11 +22,16 @@ const ALT_LINHA = 34;
 export const LINHAS_POR_PAGINA = 10;
 const COLUNAS = [
   { t: 'Nº', w: 28, al: 'center' },
-  { t: 'Nome Completo', w: 300 },
-  { t: 'CPF', w: 110, al: 'center' },
-  { t: 'Empresa', w: 190 },
-  { t: 'Assinatura', w: CW - 28 - 300 - 110 - 190, al: 'center' }
+  { t: 'Nome Completo', w: 280 },
+  { t: 'CPF', w: 102, al: 'center' },
+  { t: 'Empresa', w: 150 },
+  { t: 'Resultado', w: 78, al: 'center' },
+  { t: 'Assinatura', w: CW - 28 - 280 - 102 - 150 - 78, al: 'center' }
 ];
+const COL_ASS = COLUNAS.length - 1;
+const VERDE = rgb(0.11, 0.48, 0.30);
+const VERMELHO = rgb(0.70, 0.15, 0.12);
+const txtResultado = a => (a === true ? 'APROVADO' : a === false ? 'REPROVADO' : '');
 
 function criarEscritor(fonte) {
   const cache = new Map();
@@ -112,7 +117,7 @@ function dataBR(iso) { return iso ? iso.split('-').reverse().join('/') : ''; }
 
 /**
  * @param {object} d  { id, cliente, cidade, uf, data (AAAA-MM-DD), instrutor, fabricantes[], maquinas[],
- *                      operadores: [{ nome, cpf }] }
+ *                      operadores: [{ nome, cpf, aprovado? (true/false; ausente = sem prova) }] }
  * @param {Uint8Array[]} assinaturas  PNGs, na mesma ordem dos operadores
  * @param {Uint8Array[]} fotos        JPEGs
  * @param {Uint8Array|null} logo      PNG da logo
@@ -169,11 +174,12 @@ export async function gerarListaPresenca(d, assinaturas, fotos, logo, quando = n
     const fim = Math.min(ini + LINHAS_POR_PAGINA, d.operadores.length);
     for (let i = ini; i < fim; i++) {
       const o = d.operadores[i];
-      const valores = [String(i + 1), o.nome, o.cpf, d.cliente, ''];
+      const valores = [String(i + 1), o.nome, o.cpf, d.cliente, txtResultado(o.aprovado), ''];
       x = M;
       COLUNAS.forEach((c, k) => {
         caixa(pag, x, y, c.w, ALT_LINHA);
-        if (k < 4) texto(pag, ctx, valores[k], x, y, c.w, ALT_LINHA, { al: c.al || 'left' });
+        if (k === 4) texto(pag, ctx, valores[k], x, y, c.w, ALT_LINHA, { al: 'center', negrito: true, tam: 7.5, cor: o.aprovado ? VERDE : VERMELHO });
+        else if (k < COL_ASS) texto(pag, ctx, valores[k], x, y, c.w, ALT_LINHA, { al: c.al || 'left' });
         else if (imgsAss[i]) imagemNaCaixa(pag, imgsAss[i], x, y, c.w, ALT_LINHA, 2);
         x += c.w;
       });
