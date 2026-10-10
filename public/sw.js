@@ -1,7 +1,7 @@
 // Service worker: deixa o app instalável e abre mesmo sem internet.
 // "Rede primeiro": sempre busca a versão nova; usa o que está guardado só se a rede falhar.
 // Não intercepta nada do Supabase (outra origem) nem envios (POST).
-const VERSAO = 'pemt-v3';
+const VERSAO = 'pemt-v5';
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(VERSAO).then(c => c.addAll(['./', './index.html', './manifest.webmanifest'])).then(() => self.skipWaiting()));

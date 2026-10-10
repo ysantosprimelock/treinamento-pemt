@@ -8,14 +8,28 @@ import PadAssinatura from '../componentes/PadAssinatura';
 import Cabecalho from '../componentes/Cabecalho';
 import EtapaProva, { textoResultado } from '../componentes/EtapaProva';
 import { resultadoFinal } from '../prova/correcao.js';
+import { aplicarResultadosQr, assinaturasPendentes, base64ParaBlob } from '../lib/provaApi';
 
 // Campos que sempre ficam em MAIÚSCULAS
 const up = s => String(s || '').toLocaleUpperCase('pt-BR');
 const CAMPOS_MAIUSC = ['cliente', 'local', 'cidade'];
 export const emailValido = v => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v);
 
-// Ordem do fluxo: operadores (CPF) antes de tudo, porque a prova é ligada ao CPF
-const PASSOS = ['Turma', 'Operadores', 'Fotos', 'Prova', 'Assinar'];
+// Ordem do fluxo: operadores (CPF) antes de tudo, porque a prova é ligada ao CPF.
+// Fotos depois da prova: são da parte prática. Quem fez a prova pelo QR code assina no próprio
+// celular ao terminar; os demais assinam na última etapa, no aparelho do instrutor.
+const PASSOS = ['Turma', 'Operadores', 'Prova', 'Fotos', 'Assinaturas'];
+const P_PROVA = 2, P_FOTOS = 3, P_ASSIN = 4;
+const INTERVALO_ASSIN = 10000;
+
+// Roteiro de fotos da prática (padrão documental)
+export const ROTEIRO_FOTOS = [
+  ['Turma com a máquina', 'todos de frente, a máquina inteira aparecendo'],
+  ['Inspeção pré-uso', 'operador conferindo a máquina (pneus, comandos, plaquetas)'],
+  ['EPI e cinto', 'operador no cesto com o cinto preso no ponto de ancoragem'],
+  ['Operação em altura', 'plataforma elevada, área isolada e alguém no solo'],
+  ['Comandos de solo', 'demonstração da descida de emergência']
+];
 const ULTIMO = PASSOS.length - 1;
 const FAB_PADRAO = ['Skyjack', 'Genie', 'JLG'];
 
@@ -34,7 +48,7 @@ export function validar(passo, t) {
     if (!t.fabricantes.length) e.push('Marque ao menos um fabricante.');
     if (!t.maquinas.length) e.push('Adicione ao menos uma máquina ou modelo.');
   }
-  if (passo === 2) {
+  if (passo === P_FOTOS) {
     if (t.fotos.length < MIN_FOTOS || t.fotos.length > MAX_FOTOS) e.push(`Adicione de ${MIN_FOTOS} a ${MAX_FOTOS} fotos (agora: ${t.fotos.length}).`);
   }
   if (passo === 1) {
@@ -52,12 +66,12 @@ export function validar(passo, t) {
       }
     });
   }
-  if (passo === 3) {
+  if (passo === P_PROVA) {
     const provas = t.provas || {}, decisoes = t.decisoes || {};
     const sem = t.operadores.filter(o => resultadoFinal(provas[o.k], decisoes[o.k]) === null);
     if (sem.length) e.push(`Falta o resultado da prova de ${sem.length} operador(es): ${sem.map(o => o.nome || 'sem nome').join(', ')}. Aplique a prova (QR code ou papel) ou toque em Aprovar/Reprovar.`);
   }
-  if (passo === 4) {
+  if (passo === P_ASSIN) {
     const faltam = t.operadores.filter(o => !(t.assinaturas || {})[o.k]);
     if (faltam.length) e.push(`Faltam ${faltam.length} assinatura(s): ${faltam.map(o => o.nome).join(', ')}.`);
   }
@@ -121,6 +135,40 @@ export default function Editor({ id, listas, aoVoltar, aoFinalizar, api = null, 
     };
   }, [salvarAgora]);
 
+  // ---------- Resultados e assinaturas do QR code ----------
+  // Busca no servidor as provas feitas pelo celular e as assinaturas feitas no fim da prova.
+  const sincronizar = useCallback(async () => {
+    if (!api || !tRef.current) return;
+    const lista = await api.resultados(tRef.current.id);
+    const novas = aplicarResultadosQr(tRef.current, lista);
+    if (novas) {
+      tRef.current = { ...tRef.current, provas: novas };
+      setT(prev => ({ ...prev, provas: novas, atualizadoEm: Date.now() }));
+    }
+    if (!api.assinatura) return;
+    for (const p of assinaturasPendentes(tRef.current, lista)) {
+      const r = await api.assinatura(tRef.current.id, p.cpf);
+      if (!r || !r.png) continue;
+      const blob = base64ParaBlob(r.png);
+      const chave = `${id}:ass:${p.k}`;
+      await db.put('arquivos', { chave, treinamentoId: id, tipo: 'assinatura', blob });
+      setUrls(u => { if (u[chave]) URL.revokeObjectURL(u[chave]); const n = { ...u, [chave]: URL.createObjectURL(blob) }; urlsRef.current = n; return n; });
+      const em = r.em || p.em;
+      tRef.current = { ...tRef.current, assinaturas: { ...(tRef.current.assinaturas || {}), [p.k]: chave }, assinaturasQr: { ...(tRef.current.assinaturasQr || {}), [p.k]: em } };
+      setT(prev => ({ ...prev, assinaturas: { ...(prev.assinaturas || {}), [p.k]: chave }, assinaturasQr: { ...(prev.assinaturasQr || {}), [p.k]: em }, atualizadoEm: Date.now() }));
+    }
+  }, [api, id]);
+
+  // Na etapa Assinaturas, continua buscando as assinaturas feitas no celular
+  const temSessao = !!(t && t.provaSessao);
+  useEffect(() => {
+    if (passo !== P_ASSIN || !temSessao || !online || !api) return;
+    const vai = () => sincronizar().catch(() => {});
+    vai();
+    const iv = setInterval(vai, INTERVALO_ASSIN);
+    return () => clearInterval(iv);
+  }, [passo, temSessao, online, api, sincronizar]);
+
   const alterar = fn => setT(prev => ({ ...prev, ...fn(prev), atualizadoEm: Date.now() }));
   const setCampo = k => e => { const v = CAMPOS_MAIUSC.includes(k) ? up(e.target.value) : e.target.value; alterar(() => ({ [k]: v })); };
   const addUrl = (chave, blob) => setUrls(u => { const n = { ...u, [chave]: URL.createObjectURL(blob) }; urlsRef.current = n; return n; });
@@ -166,7 +214,11 @@ export default function Editor({ id, listas, aoVoltar, aoFinalizar, api = null, 
       await db.put('arquivos', { chave, treinamentoId: id, tipo: 'assinatura', blob });
       tirarUrl(chave);
       addUrl(chave, blob);
-      alterar(prev => ({ assinaturas: { ...(prev.assinaturas || {}), [k]: chave } }));
+      alterar(prev => {
+        const qr = { ...(prev.assinaturasQr || {}) };
+        delete qr[k]; // colhida neste aparelho: vale sobre a do celular
+        return { assinaturas: { ...(prev.assinaturas || {}), [k]: chave }, assinaturasQr: qr };
+      });
       setAssinando(null);
     } catch (err) {
       console.error(err);
@@ -182,8 +234,15 @@ export default function Editor({ id, listas, aoVoltar, aoFinalizar, api = null, 
       // resultado pelo QR code é ligado ao CPF: se o CPF mudar, o resultado deixa de valer
       const r = (prev.provas || {})[k];
       const antes = prev.operadores.find(o => o.k === k);
-      if (campo === 'cpf' && r && r.modo === 'qr' && antes && antes.cpf.replace(/\D/g, '') !== v.replace(/\D/g, '')) {
+      const mudouCpf = campo === 'cpf' && antes && antes.cpf.replace(/\D/g, '') !== v.replace(/\D/g, '');
+      if (mudouCpf && r && r.modo === 'qr') {
         const p = { ...prev.provas }; delete p[k]; res.provas = p;
+      }
+      // assinatura feita no celular também é ligada ao CPF
+      if (mudouCpf && (prev.assinaturasQr || {})[k]) {
+        const a = { ...(prev.assinaturas || {}) }; delete a[k];
+        const q = { ...prev.assinaturasQr }; delete q[k];
+        res.assinaturas = a; res.assinaturasQr = q;
       }
       return res;
     });
@@ -198,7 +257,9 @@ export default function Editor({ id, listas, aoVoltar, aoFinalizar, api = null, 
       delete p[o.k];
       const d = { ...(prev.decisoes || {}) };
       delete d[o.k];
-      return { operadores: prev.operadores.filter(x => x.k !== o.k), assinaturas: a, provas: p, decisoes: d };
+      const q = { ...(prev.assinaturasQr || {}) };
+      delete q[o.k];
+      return { operadores: prev.operadores.filter(x => x.k !== o.k), assinaturas: a, assinaturasQr: q, provas: p, decisoes: d };
     });
     if (chave) { tirarUrl(chave); await db.del('arquivos', chave); }
     for (const a of await db.arquivosDe(id).catch(() => [])) if (a.chave.startsWith(`${id}:folha:${o.k}`)) await db.del('arquivos', a.chave).catch(() => {});
@@ -325,10 +386,14 @@ export default function Editor({ id, listas, aoVoltar, aoFinalizar, api = null, 
           </>
         )}
 
-        {passo === 2 && (
+        {passo === P_FOTOS && (
           <section className="sec">
-            <h2>Fotos do treinamento</h2>
-            <p className="dica">De {MIN_FOTOS} a {MAX_FOTOS} fotos: turma, operadores e máquinas. Servem como registro documental.</p>
+            <h2>Fotos da prática</h2>
+            <p className="dica">De {MIN_FOTOS} a {MAX_FOTOS} fotos, tiradas durante o treinamento prático. Servem como registro documental: siga o roteiro abaixo.</p>
+            <ol className="roteiro">
+              {ROTEIRO_FOTOS.map(([tit, desc]) => <li key={tit}><b>{tit}</b> <span>{desc}</span></li>)}
+            </ol>
+            <p className="dica">Celular na <b>horizontal</b>, luz atrás de quem fotografa, sem zoom. Rostos visíveis; não fotografe documentos nem CPF.</p>
             <div className="dois">
               <button type="button" className="btn prim" disabled={t.fotos.length >= MAX_FOTOS || !!processando} onClick={() => camRef.current.click()}>Tirar foto</button>
               <button type="button" className="btn" disabled={t.fotos.length >= MAX_FOTOS || !!processando} onClick={() => galRef.current.click()}>Galeria</button>
@@ -372,9 +437,9 @@ export default function Editor({ id, listas, aoVoltar, aoFinalizar, api = null, 
           </section>
         )}
 
-        {passo === 3 && <EtapaProva id={id} t={t} alterar={alterar} api={api} online={online} carregarLogo={carregarLogo} lerFoto={lerFoto} obterMapa={obterMapa} />}
+        {passo === P_PROVA && <EtapaProva id={id} t={t} alterar={alterar} api={api} online={online} carregarLogo={carregarLogo} sincronizar={sincronizar} lerFoto={lerFoto} obterMapa={obterMapa} />}
 
-        {passo === 4 && (
+        {passo === P_ASSIN && (
           <>
             <section className="sec">
               <h2>Resumo</h2>
@@ -385,26 +450,37 @@ export default function Editor({ id, listas, aoVoltar, aoFinalizar, api = null, 
                 <dt>E-mails</dt><dd>{listaEmails(t.emailCliente).join(', ') || 'não informado (só Kimtech)'}</dd>
                 <dt>Fabricantes</dt><dd>{t.fabricantes.join(' / ')}</dd>
                 <dt>Máquinas</dt><dd>{t.maquinas.join(' / ')}</dd>
-                <dt>Fotos</dt><dd>{t.fotos.length}</dd>
                 <dt>Prova</dt><dd>{t.operadores.filter(o => resultadoFinal((t.provas || {})[o.k], (t.decisoes || {})[o.k]) === true).length} aprovado(s) de {t.operadores.length}</dd>
+                <dt>Fotos</dt><dd>{t.fotos.length}</dd>
               </dl>
             </section>
             <section className="sec">
               <h2>Assinaturas</h2>
               <p className="dica">{nAssin} de {t.operadores.length} assinaturas coletadas. Todos assinam a lista de presença, inclusive quem foi reprovado; certificado só para aprovados.</p>
+              <p className="dica">Quem fez a prova <b>pelo celular</b> já assina no próprio celular, ao terminar. Quem fez <b>no papel</b> (ou não fez prova) assina aqui: com o dedo na tela ou, no notebook, pelo touchpad ou mouse segurando o clique.</p>
               <ul className="assin">
                 {t.operadores.map(o => {
                   const chave = (t.assinaturas || {})[o.k];
-                  const res = textoResultado((t.provas || {})[o.k], (t.decisoes || {})[o.k]);
+                  const doCelular = !!(chave && (t.assinaturasQr || {})[o.k]);
+                  const pr = (t.provas || {})[o.k];
+                  const esperaCelular = !chave && pr && pr.modo === 'qr';
+                  const res = textoResultado(pr, (t.decisoes || {})[o.k]);
                   return (
                     <li key={o.k}>
-                      <div><b>{o.nome}</b><small>{o.cpf}</small><small className={`res ${res.cls}`}>{res.txt}</small></div>
+                      <div><b>{o.nome}</b><small>{o.cpf}</small><small className={`res ${res.cls}`}>{res.txt}</small>
+                        {doCelular && <small className="assinou">Assinou no celular dele</small>}
+                        {esperaCelular && <small className="res pend">Aguardando assinatura no celular</small>}
+                      </div>
                       {chave && urls[chave] && <img src={urls[chave]} alt={`Assinatura de ${o.nome}`} />}
-                      <button type="button" className={`btn peq${chave ? '' : ' prim'}`} onClick={() => setAssinando(o.k)}>{chave ? 'Refazer' : 'Assinar'}</button>
+                      <button type="button" className={`btn peq${chave || esperaCelular ? '' : ' prim'}`} onClick={() => setAssinando(o.k)}>{chave ? 'Refazer' : esperaCelular ? 'Assinar aqui' : 'Assinar'}</button>
                     </li>
                   );
                 })}
               </ul>
+              {temSessao && t.operadores.some(o => !(t.assinaturas || {})[o.k] && ((t.provas || {})[o.k] || {}).modo === 'qr') && (
+                <button type="button" className="btn peq larg" style={{ marginTop: 10 }} disabled={!online || !api}
+                  onClick={() => sincronizar().catch(e => setErros(['Não foi possível buscar as assinaturas agora. ' + (e.message || '')]))}>Buscar assinaturas do celular</button>
+              )}
             </section>
             <button type="button" className="link" onClick={descartar}>Descartar este treinamento</button>
           </>

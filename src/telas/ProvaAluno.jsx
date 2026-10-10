@@ -2,7 +2,8 @@
 // Uma questão por tela, letras grandes e botão "Ouvir" para quem tem dificuldade de leitura.
 import { useEffect, useMemo, useState } from 'react';
 import { supabase, configurado } from '../supabase';
-import { criarProvaApi } from '../lib/provaApi';
+import { criarProvaApi, blobParaDataUrl } from '../lib/provaApi';
+import PadAssinatura from '../componentes/PadAssinatura';
 import { mascaraCpf, cpfValido } from '../lib/cpf';
 import { fmtData } from '../lib/util';
 import Cabecalho from '../componentes/Cabecalho';
@@ -35,6 +36,9 @@ export default function ProvaAluno({ token, api: apiTeste }) {
   const [resp, setResp] = useState([]);
   const [resultado, setResultado] = useState(null);
   const [ocupado, setOcupado] = useState(false);
+  const [assinando, setAssinando] = useState(false);
+  const [assinado, setAssinado] = useState(false);
+  const [erroAss, setErroAss] = useState('');
 
   useEffect(() => {
     if (!apiTeste && !configurado) { setErro('Sistema não configurado.'); setEtapa('erro'); return; }
@@ -67,6 +71,19 @@ export default function ProvaAluno({ token, api: apiTeste }) {
       setErro(e.message || 'Não foi possível enviar. Verifique a internet e tente de novo.');
       setEtapa('revisar'); // as respostas continuam marcadas
     }
+  }
+
+  // Assinatura da lista de presença, no próprio celular, ao terminar a prova
+  async function assinar(blob) {
+    setOcupado(true); setErroAss('');
+    try {
+      await api.assinar(token, cpf, await blobParaDataUrl(blob));
+      setAssinando(false);
+      setAssinado(true);
+    } catch (e) {
+      setAssinando(false);
+      setErroAss(e.message || 'Não foi possível enviar a assinatura. Verifique a internet e tente de novo.');
+    } finally { setOcupado(false); }
   }
 
   function refazer() {
@@ -161,15 +178,29 @@ export default function ProvaAluno({ token, api: apiTeste }) {
           <section className={`sec resultado ${resultado.aprovado ? 'ok' : 'err'}`}>
             <p className="grande">{resultado.aprovado ? 'APROVADO' : 'NÃO PASSOU'}</p>
             <p>Você acertou <b>{resultado.acertos}</b> de {resultado.total}.</p>
-            {resultado.aprovado
-              ? <p>Prova enviada ao instrutor. Pode fechar esta página.</p>
-              : <>
-                  <p>Para passar, precisa acertar {resultado.minimo_acertos}. Fale com o instrutor e faça de novo.</p>
-                  <button type="button" className="btn prim larg" onClick={refazer}>Fazer a prova de novo</button>
-                </>}
+            {!resultado.aprovado && !assinado && <p>Para passar, precisa acertar {resultado.minimo_acertos}. Fale com o instrutor e faça de novo.</p>}
+            {assinado
+              ? <p className="assinou-ok">Assinatura enviada ao instrutor. Pode fechar esta página.</p>
+              : resultado.aprovado
+                ? <>
+                    <p><b>Último passo:</b> assine a lista de presença.</p>
+                    <button type="button" className="btn prim larg" disabled={ocupado} onClick={() => setAssinando(true)}>{ocupado ? 'Enviando…' : 'Assinar a lista de presença'}</button>
+                  </>
+                : <>
+                    <button type="button" className="btn prim larg" onClick={refazer}>Fazer a prova de novo</button>
+                    <p className="dica" style={{ marginTop: 16 }}>Se o instrutor pediu para encerrar, assine a lista de presença:</p>
+                    <button type="button" className="btn larg" disabled={ocupado} onClick={() => setAssinando(true)}>{ocupado ? 'Enviando…' : 'Assinar a lista de presença'}</button>
+                  </>}
+            {assinado && !resultado.aprovado && <button type="button" className="btn larg" style={{ marginTop: 12 }} onClick={refazer}>Fazer a prova de novo</button>}
+            {erroAss && <div className="aviso" role="alert" style={{ marginTop: 12, textAlign: 'left' }}><p>{erroAss}</p></div>}
           </section>
         )}
       </main>
+
+      {assinando && (
+        <PadAssinatura nome={nome ? `Assinatura de ${nome}` : 'Sua assinatura'} dica="Assine com o dedo dentro do quadro, como no documento."
+          textoOk="Enviar assinatura" aoConfirmar={assinar} aoCancelar={() => setAssinando(false)} />
+      )}
 
       {etapa === 'questao' && q && (
         <nav className="barra">

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import QRCode from 'qrcode';
 import * as db from '../lib/db';
 import { provaAtual, provaPorId, corrigir, minimoAcertos, resultadoFinal } from '../prova/index.js';
-import { linkProva, aplicarResultadosQr } from '../lib/provaApi';
+import { linkProva } from '../lib/provaApi';
 import { comprimir } from '../lib/imagem';
 import LancarPapel from './LancarPapel';
 import CorrigirFoto from './CorrigirFoto';
@@ -26,7 +26,8 @@ export function textoResultado(prova, decisao) {
   return { txt: `${prova.aprovado ? 'Aprovado' : 'Reprovado'} · ${nota}`, cls: prova.aprovado ? 'ok' : 'err' };
 }
 
-export default function EtapaProva({ id, t, alterar, api, online, carregarLogo, lerFoto = null, obterMapa = null }) {
+// sincronizar: busca no servidor os resultados e as assinaturas feitas pelo QR code (vem do Editor)
+export default function EtapaProva({ id, t, alterar, api, online, carregarLogo, sincronizar, lerFoto = null, obterMapa = null }) {
   const [qr, setQr] = useState('');
   const [msg, setMsg] = useState('');
   const [ocupado, setOcupado] = useState('');
@@ -74,12 +75,12 @@ export default function EtapaProva({ id, t, alterar, api, online, carregarLogo, 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [online]);
 
+  const sincRef = useRef(sincronizar);
+  sincRef.current = sincronizar;
   const atualizar = useCallback(async () => {
-    if (!api) return;
+    if (!api || !sincRef.current) return;
     try {
-      const lista = await api.resultados(tRef.current.id);
-      const novas = aplicarResultadosQr(tRef.current, lista);
-      if (novas) alterarRef.current(() => ({ provas: novas }));
+      await sincRef.current();
       setMsg('');
     } catch (e) {
       setMsg('Não foi possível buscar os resultados agora. ' + (e.message || ''));
@@ -230,7 +231,7 @@ export default function EtapaProva({ id, t, alterar, api, online, carregarLogo, 
         {sessao && (
           <>
             {verQr && qr && <div className="qr"><img src={qr} alt="QR code da prova" /></div>}
-            <p className="dica" style={{ marginTop: 8 }}>O operador aponta a câmera do celular para o QR code, digita o CPF e responde. O resultado aparece aqui sozinho.</p>
+            <p className="dica" style={{ marginTop: 8 }}>O operador aponta a câmera do celular para o QR code, digita o CPF, responde e, no fim, <b>assina a lista de presença no próprio celular</b>. O resultado e a assinatura aparecem aqui sozinhos.</p>
             <div className="dois">
               <button type="button" className="btn peq" onClick={() => setVerQr(v => !v)}>{verQr ? 'Esconder QR' : 'Mostrar QR'}</button>
               <button type="button" className="btn peq" onClick={compartilhar}>Enviar link</button>
@@ -259,6 +260,7 @@ export default function EtapaProva({ id, t, alterar, api, online, carregarLogo, 
                 <div className="res-topo">
                   <div><b>{o.nome}</b><small>{o.cpf}</small></div>
                   <span className={`res ${s.cls}`}>{s.txt}</span>
+                  {(t.assinaturasQr || {})[o.k] && (t.assinaturas || {})[o.k] && <small className="assinou">Assinou no celular</small>}
                 </div>
                 <div className="res-acoes">
                   <button type="button" className="btn peq" disabled={!prova} onClick={() => setFotoDe(o.k)}>Corrigir pela foto</button>

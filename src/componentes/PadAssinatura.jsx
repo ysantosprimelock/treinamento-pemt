@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 
-export default function PadAssinatura({ nome, aoConfirmar, aoCancelar }) {
+export default function PadAssinatura({ nome, aoConfirmar, aoCancelar, dica = 'Assine com o dedo dentro do quadro. No notebook: segure o clique do touchpad ou do mouse e escreva.', textoOk = 'Confirmar assinatura' }) {
   const dlg = useRef(null);
   const cv = useRef(null);
   const st = useRef({ desenhando: false, pontos: 0, ctx: null });
@@ -79,12 +79,12 @@ export default function PadAssinatura({ nome, aoConfirmar, aoCancelar }) {
     <dialog ref={dlg} aria-labelledby="assin-nome">
       <div className="dlg">
         <h3 id="assin-nome">{nome}</h3>
-        <p className="dica">Assine com o dedo dentro do quadro.</p>
+        <p className="dica">{dica}</p>
         <canvas ref={cv} className="pad" onPointerDown={baixo} onPointerMove={move} onPointerUp={cima} onPointerCancel={cima} onPointerLeave={cima} />
         <div className="dlg-bts">
           <button type="button" className="btn" onClick={iniciar}>Limpar</button>
           <button type="button" className="btn" onClick={aoCancelar}>Cancelar</button>
-          <button type="button" className="btn prim" onClick={confirmar}>Confirmar assinatura</button>
+          <button type="button" className="btn prim" onClick={confirmar}>{textoOk}</button>
         </div>
       </div>
     </dialog>

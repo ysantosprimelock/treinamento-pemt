@@ -192,3 +192,10 @@ h3.sub { margin: 0 0 8px; color: var(--ink); }
 .resultado .grande { font: 700 34px/1.1 var(--font-h); margin: 8px 0; }
 .resultado.ok .grande { color: var(--ok); } .resultado.err .grande { color: var(--err); }
 .resultado p { font-size: 19px; }
+/* v5: roteiro de fotos e assinatura pelo celular */
+.roteiro { margin: 0 0 12px; padding-left: 22px; }
+.roteiro li { margin: 0 0 6px; }
+.roteiro li span { color: var(--muted); }
+.roteiro li span::before { content: '– '; }
+small.assinou, .res-topo small.assinou { color: var(--ok); font-weight: 600; }
+.assinou-ok { color: var(--ok); font-weight: 600; }

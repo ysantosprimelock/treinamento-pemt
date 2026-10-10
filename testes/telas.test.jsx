@@ -9,6 +9,7 @@ g.requestAnimationFrame = cb => setTimeout(cb, 0); g.cancelAnimationFrame = id =
 g.IS_REACT_ACT_ENVIRONMENT = true;
 let nUrl = 0; URL.createObjectURL = () => `blob:${++nUrl}`; URL.revokeObjectURL = () => {};
 dom.window.HTMLDialogElement.prototype.showModal = function () { this.open = true; };
+dom.window.HTMLElement.prototype.setPointerCapture = function () {};
 dom.window.HTMLCanvasElement.prototype.getContext = () => ({ setTransform() {}, beginPath() {}, moveTo() {}, lineTo() {}, stroke() {}, fillRect() {}, drawImage() {} });
 dom.window.HTMLCanvasElement.prototype.toBlob = function (cb) { cb(new Blob([new Uint8Array(20)], { type: 'image/jpeg' })); };
 g.createImageBitmap = async () => ({ width: 1600, height: 2200, close() {} });
@@ -76,7 +77,7 @@ ok(salvo.emailCliente === 'compras@acme.com.br; sst@acme.com.br, compras@acme.co
 ok(!!document.querySelector('header img.cab-logo[alt="Kimtech"]'), 'cabeçalho com a logo da Kimtech');
 await clicar(botao('Avançar'));
 ok(txt().includes('Operadores') && !!document.querySelector('.op'), 'avança para Operadores (2ª etapa: CPF antes da prova)');
-ok([...document.querySelectorAll('.passos li')].map(l => l.textContent).join('|') === '1 Turma|2 Operadores|3 Fotos|4 Prova|5 Assinar', 'etapas na nova ordem');
+ok([...document.querySelectorAll('.passos li')].map(l => l.textContent).join('|') === '1 Turma|2 Operadores|3 Prova|4 Fotos|5 Assinaturas', 'etapas na nova ordem: fotos depois da prova');
 await clicar(botao('Avançar'));
 ok(txt().includes('Operador 1: informe o nome completo.'), 'não avança sem operador preenchido');
 await act(async () => { root.unmount(); });
@@ -85,23 +86,24 @@ ok(voltou === false, 'nada inesperado ao desmontar');
 console.log('2) Editor: operadores, assinaturas e finalização');
 const fotos = [];
 for (let i = 0; i < 3; i++) { const chave = `C1:foto:${i}`; await db.put('arquivos', { chave, treinamentoId: 'C1', tipo: 'foto', blob: new Blob([new Uint8Array(10)]) }); fotos.push(chave); }
-await db.put('arquivos', { chave: 'C1:ass:a', treinamentoId: 'C1', tipo: 'assinatura', blob: new Blob([new Uint8Array(10)]) });
-await db.put('treinamentos', { id: 'C1', userId: 'U1', status: 'rascunho', criadoEm: 1, atualizadoEm: 1, cliente: 'ACME', local: 'Pátio', cidade: 'Fortaleza', uf: 'CE', data: '2026-10-02', fabricantes: ['JLG'], maquinas: ['3219'], fotos, operadores: [{ k: 'a', nome: 'João da Silva', cpf: '529.982.247-25', funcao: '' }], assinaturas: { a: 'C1:ass:a' } });
+await db.put('treinamentos', { id: 'C1', userId: 'U1', status: 'rascunho', criadoEm: 1, atualizadoEm: 1, cliente: 'ACME', local: 'Pátio', cidade: 'Fortaleza', uf: 'CE', data: '2026-10-02', fabricantes: ['JLG'], maquinas: ['3219'], fotos, operadores: [{ k: 'a', nome: 'João da Silva', cpf: '529.982.247-25', funcao: '' }], assinaturas: {} });
 const root2 = createRoot(document.getElementById('root'));
 // API falsa da prova pelo QR code
 const { PROVA_PEMT } = await import('../../tools/prova-pemt.js');
 const { guardarProvas, _limparProvas, provaAtual } = await import('../src/prova/index.js');
 const linhaBanco = { id: PROVA_PEMT.id, titulo: PROVA_PEMT.titulo, nota_minima: '0.700', questoes: PROVA_PEMT.questoes };
 _limparProvas(); // aparelho ainda sem a prova (primeiro uso depois da atualização)
-const chamadas = { abrir: [], resultados: 0, baixar: 0 };
+const chamadas = { abrir: [], resultados: 0, baixar: 0, assinatura: [] };
+const PNG_B64 = btoa(String.fromCharCode(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4));
 let resultadosQr = [];
 const apiFalsa = {
   abrirSessao: async t => { chamadas.abrir.push(t.operadores.map(o => o.cpf)); return { token: 'tok123', expira_em: '2026-10-08T23:00:00Z' }; },
   resultados: async () => { chamadas.resultados++; return resultadosQr; },
-  baixarProvas: async () => { chamadas.baixar++; return guardarProvas([linhaBanco]); }
+  baixarProvas: async () => { chamadas.baixar++; return guardarProvas([linhaBanco]); },
+  assinatura: async (id, cpf) => { chamadas.assinatura.push(cpf); return { cpf, em: '2026-10-08T10:01:00Z', png: PNG_B64 }; }
 };
 const respQr = PROVA_PEMT.questoes.map((q, i) => (i < 8 ? q.c : (q.c + 1) % 4));
-resultadosQr = [{ cpf: '52998224725', tentativa_id: 'TT1', prova_id: 'PEMT-1', respostas: respQr, acertos: 8, total: 10, aprovado: true, em: '2026-10-08T10:00:00Z', tentativas: 2 }];
+resultadosQr = [{ cpf: '52998224725', tentativa_id: 'TT1', prova_id: 'PEMT-1', respostas: respQr, acertos: 8, total: 10, aprovado: true, em: '2026-10-08T10:00:00Z', tentativas: 2, assinatura_em: '2026-10-08T10:01:00Z' }];
 const renderEditor = (r, extra = {}) => act(async () => { r.render(<Editor id="C1" listas={listas} api={apiFalsa} online={true} carregarLogo={async () => null} aoVoltar={() => {}} aoFinalizar={() => { finalizou = true; }} {...extra} />); });
 await renderEditor(root2);
 await act(async () => { await espera(80); });
@@ -116,9 +118,7 @@ ok(txt().includes('CPF inválido. Confira os números.'), 'aponta CPF inválido 
 await digitar([...document.querySelectorAll('input[inputmode="numeric"]')][1], '12345678909');
 ok([...document.querySelectorAll('input[inputmode="numeric"]')][1].value === '123.456.789-09', 'aplica máscara de CPF');
 await clicar(botao('Avançar'));
-ok(txt().includes('Fotos do treinamento') && document.querySelectorAll('.grade figure').length === 3, 'Fotos vem depois dos operadores');
-await clicar(botao('Avançar'));
-ok(txt().includes('Pelo celular (QR code)') && txt().includes('No papel'), 'etapa Prova com QR code e papel');
+ok(txt().includes('Pelo celular (QR code)') && txt().includes('No papel'), 'Prova vem logo depois dos operadores (QR code e papel)');
 ok(chamadas.baixar === 1 && txt().includes('10 questões. Para passar: 7 acertos') && provaAtual().id === 'PEMT-1', 'prova que não estava no aparelho é baixada sozinha (com internet)');
 ok(JSON.parse(localStorage.getItem('pemt.provas.v1')).provas['PEMT-1'].questoes.length === 10, 'prova fica guardada no aparelho para usar sem internet');
 ok([...document.querySelectorAll('.res-lista .res')].every(e => e.textContent === 'Aguardando prova'), 'operadores começam aguardando a prova');
@@ -133,6 +133,13 @@ ok(!!document.querySelector('.qr img[src^="data:image/png"]'), 'mostra o QR code
 const { linkProva } = await import('../src/lib/provaApi.js');
 ok(linkProva('tok123', { origin: 'https://ysantosprimelock.github.io', pathname: '/treinamento-pemt/index.html' }) === 'https://ysantosprimelock.github.io/treinamento-pemt/?prova=tok123', 'link do QR aponta para o próprio app com ?prova=');
 ok(chamadas.resultados >= 1 && txt().includes('Aprovado · 8 de 10 · celular'), 'resultado do celular aparece sozinho (8 de 10, aprovado)');
+ok(chamadas.assinatura.join() === '52998224725' && txt().includes('Assinou no celular'), 'assinatura feita no celular do operador é baixada junto com o resultado');
+await act(async () => { await espera(400); });
+{ const c = await db.get('treinamentos', 'C1'); const blob = (await db.get('arquivos', 'C1:ass:a') || {}).blob;
+  ok(c.assinaturas.a === 'C1:ass:a' && c.assinaturasQr.a === '2026-10-08T10:01:00Z' && blob && blob.size === 12, 'assinatura do celular guardada no aparelho como a do operador 1 (PNG)'); }
+await clicar(botao('Atualizar resultados'));
+await act(async () => { await espera(80); });
+ok(chamadas.assinatura.length === 1, 'não baixa de novo a assinatura que já está no aparelho');
 
 console.log('2c) Prova em papel e decisão do instrutor');
 const linhas = () => [...document.querySelectorAll('.res-lista li')];
@@ -206,7 +213,11 @@ const pm = cp.provas[kMaria];
 ok(!document.querySelector('dialog .foto-pags') && pm.modo === 'papel' && pm.acertos === 8 && pm.lidoPorFoto === true && pm.folhas.length === 2, 'salva: prova em papel lida pela foto, 8 acertos, 2 fotos da folha');
 ok((await db.arquivosDe('C1')).filter(a => a.tipo === 'folha').length === 2, 'as 2 fotos ficam guardadas no aparelho (para o comprovante)');
 await clicar(botao('Avançar'));
-ok(txt().includes('Assinaturas') && txt().includes('1 de 2 assinaturas'), 'etapa Assinar mostra 1 de 2');
+ok(txt().includes('Fotos da prática') && document.querySelectorAll('.grade figure').length === 3 && document.querySelectorAll('.roteiro li').length === 5 && !txt().includes('Plaqueta'), 'Fotos vem depois da prova, com o roteiro de 5 fotos da prática (sem plaqueta)');
+await clicar(botao('Avançar'));
+ok(txt().includes('Assinaturas') && txt().includes('1 de 2 assinaturas'), 'etapa Assinaturas mostra 1 de 2 (a do celular já conta)');
+ok([...document.querySelectorAll('.assin li')][0].textContent.includes('Assinou no celular dele') && [...document.querySelectorAll('.assin li')][1].textContent.includes('Assinar'), 'mostra quem assinou no celular e quem assina aqui (prova no papel)');
+ok(txt().includes('touchpad'), 'orienta assinar pelo touchpad no notebook');
 ok(txt().includes('2 aprovado(s) de 2'), 'resumo mostra o resultado da prova');
 await clicar(botao('Finalizar e enviar'));
 ok([...document.querySelectorAll('.assin b')].map(e => e.textContent).includes('MARIA SOUZA'), 'nome do operador em MAIÚSCULAS');
@@ -231,6 +242,7 @@ c1 = await db.get('treinamentos', 'C1');
 ok(finalizou && c1.status === 'pronto' && c1.finalizadoEm > 0 && c1.operadores.length === 2, 'finaliza: status "pronto" gravado no aparelho e volta ao início');
 ok(c1.operadores[0].nome === 'JOÃO DA SILVA' && c1.cliente === 'ACME', 'ao finalizar, dados antigos em minúsculas também viram MAIÚSCULAS');
 ok(c1.provas[c1.operadores[0].k].modo === 'qr' && c1.provas[c1.operadores[0].k].tentativaId === 'TT1' && !c1.decisoes[c1.operadores[0].k], 'operador 1: prova do celular, sem decisão');
+ok(c1.assinaturas.a === 'C1:ass:a' && !!c1.assinaturasQr.a, 'operador 1: assinatura do celular segue no treinamento finalizado');
 ok(c1.provas[c1.operadores[1].k].modo === 'papel' && c1.provas[c1.operadores[1].k].acertos === 8 && c1.decisoes[c1.operadores[1].k].aprovado === true, 'operador 2: prova de papel (lida pela foto) + decisão do instrutor, guardadas separadas');
 await act(async () => { root3.unmount(); });
 
@@ -253,6 +265,11 @@ const nov = aplicarResultadosQr(tR, [{ cpf: '52998224725', tentativa_id: 'A', ac
   { cpf: '11144477735', tentativa_id: 'C', acertos: 10, total: 10, aprovado: true, em: '2026-10-08T10:00:00Z', tentativas: 1 }]);
 ok(nov.x.tentativaId === 'A' && nov.y.modo === 'papel' && Object.keys(nov).length === 2, 'QR: aplica por CPF, respeita o papel e ignora CPF fora da turma');
 ok(aplicarResultadosQr({ ...tR, provas: nov }, [{ cpf: '52998224725', tentativa_id: 'A', tentativas: 1 }]) === null, 'QR: sem novidade não regrava');
+const { assinaturasPendentes } = await import('../src/lib/provaApi.js');
+const listaAss = [{ cpf: '52998224725', assinatura_em: 'E1' }, { cpf: '12345678909', assinatura_em: 'E2' }, { cpf: '11144477735', assinatura_em: 'E3' }];
+ok(assinaturasPendentes(tR, listaAss).map(p => p.k).join() === 'x,y', 'assinaturas do celular: baixa as da turma, ignora CPF de fora');
+ok(assinaturasPendentes({ ...tR, assinaturas: { x: 'k1' } }, listaAss).map(p => p.k).join() === 'y', 'assinatura colhida no aparelho do instrutor vale (não é substituída)');
+ok(assinaturasPendentes({ ...tR, assinaturas: { x: 'k1', y: 'k2' }, assinaturasQr: { x: 'E1', y: 'antiga' } }, listaAss).map(p => p.k).join() === 'y', 'baixa de novo só se o operador assinou outra vez');
 const { corrigir, minimoAcertos, resultadoFinal } = await import('../src/prova/correcao.js');
 ok(resultadoFinal(undefined, undefined) === null && resultadoFinal({ aprovado: false }, undefined) === false && resultadoFinal({ aprovado: false }, { aprovado: true }) === true
   && resultadoFinal(undefined, { aprovado: false }) === false, 'resultado final: decisão do instrutor vale sobre a nota');
@@ -269,7 +286,16 @@ const envios = [];
 const apiAluno = {
   publica: async tk => { if (tk !== 'tok123') throw new Error('Link da prova inválido ou vencido.'); return { ...semGabarito(PROVA_PEMT), cliente: 'ACME', data: '2026-10-08', minimo_acertos: 7 }; },
   identificar: async (tk, c) => { if (c.replace(/\D/g, '') !== '52998224725') throw new Error('CPF não encontrado nesta turma.'); return { primeiro_nome: 'JOÃO' }; },
-  responder: async (tk, c, r) => { envios.push(r); const x = corrigir(PROVA_PEMT, r); return { ...x, minimo_acertos: 7 }; }
+  responder: async (tk, c, r) => { envios.push(r); const x = corrigir(PROVA_PEMT, r); return { ...x, minimo_acertos: 7 }; },
+  assinar: async (tk, c, png) => { assinaturasAluno.push({ tk, c, png }); return { ok: true }; }
+};
+const assinaturasAluno = [];
+const rabiscar = async () => {
+  const cv = document.querySelector('dialog canvas.pad');
+  const ev = (tipo, x, y) => act(async () => { cv.dispatchEvent(new dom.window.MouseEvent(tipo, { bubbles: true, clientX: x, clientY: y })); });
+  await ev('pointerdown', 5, 5);
+  for (let i = 0; i < 15; i++) await ev('pointermove', 10 + i * 4, 10 + (i % 3) * 5);
+  await ev('pointerup', 70, 20);
 };
 const root5 = createRoot(document.getElementById('root'));
 await act(async () => { root5.render(<ProvaAluno token="tok123" api={apiAluno} />); });
@@ -296,11 +322,20 @@ await responderTudo(5);
 ok(txt().includes('Conferir respostas') && document.querySelectorAll('.revisao button').length === 10, 'tela de conferência com as 10 respostas');
 await clicar(botao('Enviar prova'));
 ok(txt().includes('NÃO PASSOU') && txt().includes('acertou 5') && !!botao('Fazer a prova de novo'), 'resultado: não passou, com opção de refazer');
+ok(!!botao('Assinar a lista de presença') && txt().includes('Se o instrutor pediu para encerrar'), 'quem não passou também pode assinar, se o instrutor encerrar');
 ok(Array.isArray(envios[0]) && envios[0].length === 10 && envios[0].every(Number.isInteger), 'envia 10 respostas (índices)');
 await clicar(botao('Fazer a prova de novo'));
 await responderTudo(10);
 await clicar(botao('Enviar prova'));
 ok(txt().includes('APROVADO') && txt().includes('acertou 10') && !botao('Fazer a prova de novo'), 'refaz e passa; aprovado não vê botão de refazer');
+ok(txt().includes('Último passo') && !!botao('Assinar a lista de presença'), 'ao terminar a prova, pede a assinatura da lista de presença');
+await clicar(botao('Assinar a lista de presença'));
+ok(!!document.querySelector('dialog canvas.pad') && !!botao('Enviar assinatura'), 'abre o quadro de assinatura no celular do operador');
+await rabiscar();
+await clicar(botao('Enviar assinatura'));
+await act(async () => { await espera(50); });
+ok(assinaturasAluno.length === 1 && assinaturasAluno[0].tk === 'tok123' && assinaturasAluno[0].c === '529.982.247-25' && assinaturasAluno[0].png.startsWith('data:image/'), 'envia a assinatura com o token e o CPF');
+ok(txt().includes('Assinatura enviada ao instrutor') && !document.querySelector('dialog canvas.pad'), 'confirma o envio e libera para fechar');
 await act(async () => { root5.unmount(); });
 const root6 = createRoot(document.getElementById('root'));
 await act(async () => { root6.render(<ProvaAluno token="vencido" api={apiAluno} />); });

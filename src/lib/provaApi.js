@@ -25,8 +25,43 @@ export function criarProvaApi(supabase) {
     baixarProvas: () => baixarProvas(supabase),
     publica: token => rpc('prova_publica', { p_token: token }),
     identificar: (token, cpf) => rpc('prova_identificar', { p_token: token, p_cpf: cpf }),
-    responder: (token, cpf, respostas) => rpc('prova_responder', { p_token: token, p_cpf: cpf, p_respostas: respostas })
+    responder: (token, cpf, respostas) => rpc('prova_responder', { p_token: token, p_cpf: cpf, p_respostas: respostas }),
+    // operador assina no próprio celular, depois de enviar a prova (png: data URL ou base64)
+    assinar: (token, cpf, png) => rpc('prova_assinar', { p_token: token, p_cpf: cpf, p_png: png }),
+    // instrutor baixa a assinatura feita no celular do operador: { cpf, em, png (base64) } ou null
+    assinatura: (id, cpf) => rpc('prova_assinatura', { p_treinamento: id, p_cpf: cpf })
   };
+}
+
+// Converte o PNG da assinatura em data URL (para enviar) e de volta em Blob (para guardar no aparelho)
+export async function blobParaDataUrl(blob) {
+  const u = new Uint8Array(await blob.arrayBuffer());
+  let bin = '';
+  for (let i = 0; i < u.length; i += 0x8000) bin += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000));
+  return `data:${blob.type || 'image/png'};base64,${btoa(bin)}`;
+}
+export function base64ParaBlob(b64, tipo = 'image/png') {
+  const bin = atob(String(b64 || '').replace(/^data:[^,]*,/, '').replace(/\s/g, ''));
+  const u = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+  return new Blob([u], { type: tipo });
+}
+
+// Assinaturas feitas no celular do operador que ainda não estão neste aparelho.
+// Não substitui assinatura colhida no aparelho do instrutor (essa vale).
+// Devolve [{ k, cpf, em }].
+export function assinaturasPendentes(t, lista) {
+  const ass = t.assinaturas || {}, qr = t.assinaturasQr || {};
+  const out = [];
+  for (const r of lista || []) {
+    if (!r.assinatura_em) continue;
+    const op = t.operadores.find(o => soDigitos(o.cpf) === r.cpf);
+    if (!op) continue;
+    if (ass[op.k] && !qr[op.k]) continue; // assinou no aparelho do instrutor
+    if (ass[op.k] && qr[op.k] === r.assinatura_em) continue; // já baixada
+    out.push({ k: op.k, cpf: r.cpf, em: r.assinatura_em });
+  }
+  return out;
 }
 
 // Endereço que vai no QR code (a mesma página do app, com ?prova=<token>)
