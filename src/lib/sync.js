@@ -157,6 +157,20 @@ export function criarSync({ supabase, db, agora = () => Date.now(), carregarLogo
     if (error) throw error;
     if (!data || data.ok !== true) throw new Error('Resposta inesperada do servidor.');
 
+    // Treinamento iniciado a partir de um agendamento: avisa o banco (o agendamento vira "realizado").
+    // Falha de rede/sessão: tenta de novo depois (o registro acima não duplica). Qualquer outra recusa
+    // (ex.: agendamento apagado, banco sem o SQL 09) não impede o envio do treinamento.
+    if (t.agendamentoId) {
+      const { data: v, error: ev } = await supabase.rpc('agenda_vincular', { p: { treinamento_id: t.id, agendamento_id: t.agendamentoId } });
+      if (ev) {
+        const c = classificarErro(ev);
+        if (c.tipo === 'rede' || c.tipo === 'sessao') throw ev;
+        console.warn('Agendamento não ligado:', ev.message || ev);
+      } else if (v && v.ok === false) {
+        console.warn('Agendamento não ligado:', v.motivo);
+      }
+    }
+
     t.status = 'enviado';
     t.enviadoEm = agora();
     t.erro = null;

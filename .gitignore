@@ -1,0 +1,10 @@
+node_modules/
+dist/
+testes/.*.mjs
+testes/.*.pdf
+testes/.*.png
+*.log
+.DS_Store
+# chaves e segredos nunca vão para o repositório (ele é público)
+*.secret
+segredos*

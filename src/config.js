@@ -7,6 +7,9 @@ export const SUPABASE_URL = 'https://curiyfnhzqrpfljnihty.supabase.co';
 export const SUPABASE_ANON_KEY = 'sb_publishable_yDMVsUz-uoKhttvD4Y4O3A_02veS40b';
 // ===============================================================
 
+// Chave PÚBLICA dos avisos no celular (push). A chave privada fica só nos segredos da função enviar-push no Supabase.
+export const VAPID_PUBLIC_KEY = 'BJ2cgNRJfjHG6cXpOAEx4naXdoUtSEDIldq3wiVKMx1AGDWTH48SLx6L6GIU5hfHoX7hDWTGIwQBhWAgZaMOfaA';
+
 export const BUCKET = 'treinamentos';
 export const MIN_FOTOS = 3;
 export const MAX_FOTOS = 6;

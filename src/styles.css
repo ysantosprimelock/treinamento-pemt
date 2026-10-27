@@ -199,3 +199,13 @@ h3.sub { margin: 0 0 8px; color: var(--ink); }
 .roteiro li span::before { content: '– '; }
 small.assinou, .res-topo small.assinou { color: var(--ok); font-weight: 600; }
 .assinou-ok { color: var(--ok); font-weight: 600; }
+/* v6: agenda e avisos */
+.agenda-bloco { margin: 4px 0 16px; }
+.agenda-tit { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.agenda-tit h3 { margin-top: 4px; }
+.link.escuro { color: var(--ink); text-decoration: underline; min-height: 44px; }
+.link:disabled { opacity: .5; cursor: default; }
+.item.agenda { border-left: 5px solid var(--brand); }
+.item.agenda .obs { margin: 6px 0 0; padding: 6px 8px; background: var(--brand-claro); border-radius: 6px; font-size: 15px; overflow-wrap: anywhere; }
+.item.destaque { outline: 3px solid var(--brand); outline-offset: 2px; }
+.aviso.avisos .btn { width: 100%; }

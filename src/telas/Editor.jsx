@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import * as db from '../lib/db';
 import { MIN_FOTOS, MAX_FOTOS } from '../config';
-import { UFS, uuid, nk, comUnico, palavras, fmtData, listaEmails } from '../lib/util';
+import { UFS, uuid, nk, comUnico, palavras, fmtData, listaEmails, hoje } from '../lib/util';
 import { mascaraCpf, cpfValido } from '../lib/cpf';
 import { comprimir } from '../lib/imagem';
 import PadAssinatura from '../componentes/PadAssinatura';
@@ -319,6 +319,14 @@ export default function Editor({ id, listas, aoVoltar, aoFinalizar, api = null, 
 
         {passo === 0 && (
           <>
+            {t.agendamentoId && (
+              <div className="aviso atencao" role="note">
+                <b>Agendado pela Kimtech</b>
+                <p>{t.agendamento && t.agendamento.data ? fmtData(t.agendamento.data) : ''}{t.agendamento && t.agendamento.horario ? ` às ${t.agendamento.horario}` : ''}. Os dados abaixo vieram do agendamento: confira e corrija o que mudou em campo.</p>
+                {t.agendamento && t.agendamento.observacoes && <p><b>Observação:</b> {t.agendamento.observacoes}</p>}
+                {t.data && t.data !== hoje() && <p className="erro-campo" style={{ marginTop: 6 }}>A data do treinamento ({fmtData(t.data)}) não é a de hoje. Se o treinamento é hoje, corrija a data.</p>}
+              </div>
+            )}
             <section className="sec">
               <h2>Dados da turma</h2>
               <label>Cliente (empresa)<input className="maiusc" list="dl-clientes" autoComplete="off" autoCapitalize="characters" value={t.cliente} onChange={setCampo('cliente')} /></label>

@@ -2,16 +2,36 @@
 
 App instalável (Android/Chrome) para o instrutor registrar a turma, as fotos, os operadores e as assinaturas em campo. Tudo é salvo no celular a cada passo e enviado ao Supabase quando há internet.
 
+Desde a versão 6 há também:
+
+- **Agenda**: o administrador agenda cliente, data, horário, local e instrutor. O instrutor vê em "Agendados para você" na tela inicial e toca em **Iniciar treinamento**: a turma já abre com cliente, local, cidade, UF, e-mails, fabricantes e máquinas preenchidos (os operadores continuam sendo cadastrados em campo). Ao enviar, o agendamento vira "Realizado".
+- **Avisos no celular (push)**: o instrutor toca em **Ativar avisos** uma vez; a partir daí recebe notificação quando um treinamento é agendado, alterado ou cancelado para ele.
+- **Painel admin** em `<endereço do app>/admin/` (ex.: `https://treinamento.kimtechmanutencao.com.br/admin/`): agenda, treinamentos realizados (fotos, lista de presença com assinaturas, provas com as respostas, comprovantes, PDFs, Drive, todos os dados gravados), histórico por operador (nome ou CPF, com validade de 2 anos) e instrutores. Só entra quem tem `papel = 'admin'` no perfil.
+
+## Arquivos do Supabase (pasta `supabase/`)
+
+| Arquivo | O que é |
+|---|---|
+| `09_agenda_avisos_admin.sql` | Agenda, inscrições de aviso e funções do painel. Rodar uma vez no SQL Editor (pode repetir sem problema). |
+| `functions/enviar-push/index.ts` | Função que envia os avisos. Instalar em Edge Functions com o nome `enviar-push` e os segredos `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` e `VAPID_SUBJECT`. |
+| `testes/` | Testes automáticos do SQL e da função (não rodar no Supabase). |
+
+A chave **privada** VAPID e a chave secreta do Supabase nunca vão para este repositório (ele é público).
+
 ## Estado dos testes
 
 | O que | Como foi testado | Resultado |
 |---|---|---|
-| Fila de envio (não perder dados) | Banco local simulado + Supabase falso: queda de rede, queda no meio do envio, recusa do servidor, sessão expirada, app fechado no meio, envio duplo | 32/32 |
-| Telas | Navegador simulado (jsdom): preenchimento, validações, máscara de CPF, salvamento automático, finalização | 19/19 |
-| Compilação | `vite build` | OK |
-| **Celular real + Supabase real** | **Não testado** | Faça o teste do final deste arquivo |
+| Fila de envio (não perder dados) | Banco local simulado + Supabase falso: queda de rede, queda no meio do envio, recusa do servidor, sessão expirada, app fechado no meio, envio duplo | `npm test` |
+| Telas do instrutor | Navegador simulado (jsdom) | `npm run test:telas` |
+| Agenda, avisos e service worker | jsdom + banco local simulado; notificação testada no código real do service worker | `npm run test:agenda` |
+| Painel admin | jsdom com o acesso ao banco simulado | `npm run test:admin` |
+| SQL 09 | PostgreSQL real em memória (PGlite), em duas versões do banco, rodando duas vezes | `npm run test:banco` |
+| Função de avisos | Exemplo oficial da RFC 8291 (byte a byte), decifrado por biblioteca independente, e execução no Deno | `npm run test:push` |
+| Compilação | `vite build` (app + painel) | OK |
+| **Celular real + Supabase real** | **Não testado** | Faça os testes do final deste arquivo |
 
-Câmera, compressão de fotos, quadro de assinatura e login real só podem ser verificados no aparelho.
+Os testes usam uma prova fictícia em `../tools/prova-pemt.js` (fora do repositório, porque o repositório é público). `npm run test:tudo` roda tudo.
 
 ## 1. Chave pública do Supabase
 
@@ -88,3 +108,12 @@ Com o instrutor de teste, no celular que vai a campo:
 ## Desenvolvimento local (opcional)
 
 Requer Node.js 20+: `npm install`, `npm run dev`, `npm test`, `npm run test:telas`, `npm run build`.
+
+## Teste da agenda, dos avisos e do painel (versão 6)
+
+- [ ] `<app>/admin/` → entrar com o login de administrador → abas Agenda, Treinamentos, Operadores e Instrutores aparecem.
+- [ ] Instrutores: o instrutor de teste aparece com o e-mail.
+- [ ] No celular do instrutor: abrir o app → **Ativar avisos** → permitir. No painel, Instrutores mostra "1 celular". **Enviar aviso de teste** → a notificação chega.
+- [ ] Agenda → **Novo agendamento** para esse instrutor com "Avisar o instrutor" marcado → a notificação chega → tocar nela abre o app no agendamento.
+- [ ] No app: **Iniciar treinamento** → turma preenchida → finalizar e enviar → no painel, o agendamento passa a "Realizado" e o treinamento aparece em Treinamentos com fotos, assinaturas e provas.
+- [ ] Cancelar um agendamento no painel → aviso de cancelamento chega e ele some da lista do instrutor.

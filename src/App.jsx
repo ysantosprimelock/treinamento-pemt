@@ -5,6 +5,8 @@ import { criarSync } from './lib/sync';
 import { criarProvaApi } from './lib/provaApi';
 import { baixarProvas } from './prova/index.js';
 import { uuid, hoje, lsGet, lsSet } from './lib/util';
+import { agendaGuardada, baixarAgenda, rascunhoDeAgenda } from './lib/agenda';
+import { ativarAvisos, desligarAvisos, permissaoAvisos } from './lib/avisos';
 import Login from './telas/Login';
 import Inicio from './telas/Inicio';
 import Editor from './telas/Editor';
@@ -17,6 +19,8 @@ async function carregarLogo() {
 }
 
 const LS_USUARIO = 'pemt.usuario';
+// Notificação aberta: <app>?agenda=<id> leva ao agendamento na tela inicial
+const AGENDA_URL = new URLSearchParams(window.location.search).get('agenda');
 const LS_LISTAS = 'pemt.listas';
 
 export default function App() {
@@ -41,6 +45,10 @@ function Principal() {
   const sync = useMemo(() => criarSync({ supabase, db, carregarLogo }), []);
   const provaApi = useMemo(() => criarProvaApi(supabase), []);
   const atualizar = useCallback(() => setVersao(v => v + 1), []);
+  const [agenda, setAgenda] = useState(null); // null = recurso indisponível (banco sem o SQL 09)
+  const [agendaAtualizando, setAgendaAtualizando] = useState(false);
+  const [destaque, setDestaque] = useState(AGENDA_URL);
+  const [avisos, setAvisos] = useState(() => ({ estado: permissaoAvisos() === 'granted' ? 'ativo' : permissaoAvisos() === 'denied' ? 'bloqueado' : permissaoAvisos() === 'sem-suporte' ? 'sem-suporte' : 'pedir' }));
 
   // Sessão
   useEffect(() => {
@@ -90,6 +98,81 @@ function Principal() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uid, online]);
 
+  // Agenda guardada no aparelho (aparece mesmo sem internet)
+  const idUsuario = uid || (ultimo && ultimo.id) || null;
+  useEffect(() => {
+    if (!idUsuario) return;
+    const g = agendaGuardada(idUsuario);
+    setAgenda(g.em ? g.itens : null); // outro usuário neste aparelho: não mostra a agenda do anterior
+  }, [idUsuario]);
+
+  const carregarAgenda = useCallback(async () => {
+    if (!uid || !navigator.onLine) return;
+    setAgendaAtualizando(true);
+    try {
+      const g = await baixarAgenda(supabase, uid);
+      setAgenda(g.indisponivel ? null : g.itens);
+      if (g.indisponivel) setAvisos(a => (a.estado === 'pedir' ? { estado: 'indisponivel' } : a));
+    } catch (err) {
+      console.error('Agenda:', err);
+    } finally {
+      setAgendaAtualizando(false);
+    }
+  }, [uid]);
+
+  // Atualiza ao entrar, quando a internet volta, ao voltar para o app e quando chega um aviso
+  useEffect(() => {
+    if (!uid || !online) return;
+    carregarAgenda();
+    // Permissão já dada: renova a inscrição deste aparelho para o usuário logado
+    if (permissaoAvisos() === 'granted') {
+      ativarAvisos(supabase).then(r => setAvisos({ estado: r.estado })).catch(err => console.error('Avisos:', err));
+    }
+  }, [uid, online, carregarAgenda]);
+
+  useEffect(() => {
+    if (!uid) return;
+    let ultimaVez = 0;
+    const aoVer = () => {
+      if (document.visibilityState !== 'visible' || Date.now() - ultimaVez < 30000) return;
+      ultimaVez = Date.now();
+      carregarAgenda();
+    };
+    const aoMensagem = e => {
+      const m = e.data || {};
+      if (m.tipo === 'aviso') carregarAgenda();
+      if (m.tipo === 'abrir') {
+        try { const id = new URL(m.url).searchParams.get('agenda'); if (id) setDestaque(id); } catch { /* endereço inválido */ }
+        setTela({ nome: 'inicio' });
+        carregarAgenda();
+      }
+    };
+    document.addEventListener('visibilitychange', aoVer);
+    const sw = navigator.serviceWorker;
+    if (sw) sw.addEventListener('message', aoMensagem);
+    return () => { document.removeEventListener('visibilitychange', aoVer); if (sw) sw.removeEventListener('message', aoMensagem); };
+  }, [uid, carregarAgenda]);
+
+  // Tira o ?agenda= do endereço depois de usar (não reabre o destaque ao recarregar)
+  useEffect(() => {
+    if (AGENDA_URL && window.history && window.history.replaceState) {
+      const u = new URL(window.location.href);
+      u.searchParams.delete('agenda');
+      window.history.replaceState(null, '', u.pathname + u.search + u.hash);
+    }
+  }, []);
+
+  async function ligarAvisos() {
+    setAvisos(a => ({ ...a, ocupado: true, msg: '' }));
+    try {
+      const r = await ativarAvisos(supabase, { pedir: true });
+      setAvisos({ estado: r.estado });
+    } catch (err) {
+      console.error(err);
+      setAvisos({ estado: 'pedir', msg: 'Não foi possível ativar agora. Confira a internet e tente de novo.' });
+    }
+  }
+
   const enviar = useCallback(async (opcoes = {}) => {
     if (!uid) return;
     setEnvio(e => ({ ...e, rodando: true }));
@@ -138,6 +221,21 @@ function Principal() {
     setTela({ nome: 'editar', id: t.id });
   }
 
+  // Treinamento a partir do agendamento: abre o que já existe neste aparelho ou cria um novo preenchido
+  async function novoDeAgenda(ag) {
+    const existente = (await db.todos('treinamentos')).find(t => t.userId === usuario.id && t.agendamentoId === ag.id && t.status === 'rascunho');
+    if (existente) { setTela({ nome: 'editar', id: existente.id }); return; }
+    const t = rascunhoDeAgenda(ag, usuario.id);
+    await db.put('treinamentos', t);
+    setDestaque(null);
+    setTela({ nome: 'editar', id: t.id });
+  }
+
+  async function sair() {
+    await desligarAvisos(supabase);
+    await supabase.auth.signOut({ scope: 'local' });
+  }
+
   async function corrigir(t) {
     await db.del('arquivos', `${t.id}:pdf`); // a lista em PDF será gerada de novo com os dados corrigidos
     for (const a of await db.arquivosDe(t.id)) if (a.tipo === 'comprovante') await db.del('arquivos', a.chave); // idem comprovantes
@@ -171,7 +269,14 @@ function Principal() {
       aoAbrir={id => setTela({ nome: 'editar', id })}
       aoEnviar={() => enviar({ ignorarEspera: true, incluirCorrecao: true })}
       aoCorrigir={corrigir}
-      aoSair={() => supabase.auth.signOut({ scope: 'local' })}
+      aoSair={sair}
+      agenda={agenda}
+      agendaAtualizando={agendaAtualizando}
+      destaque={destaque}
+      avisos={usuario.offline ? null : avisos}
+      aoIniciarAgenda={novoDeAgenda}
+      aoAtualizarAgenda={usuario.offline ? null : carregarAgenda}
+      aoAtivarAvisos={ligarAvisos}
     />
   );
 }
